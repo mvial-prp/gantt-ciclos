@@ -31,53 +31,68 @@ const DEP_TYPES = [
   { id: "end_after_end",     label: "termina mín. N seg después que termina",  symbol: "A|→N→|B",  desc: "B.fin ≥ A.fin + N" },
 ];
 
+// ─── Ciclo 47 seg (régimen estacionario) ──────────────────────────────────────
+// Fuente: planilla Ciclos_Robot.xlsx, hoja Resultados
+// R1 ciclo = 47 seg: Mov A (23.5 seg) + Mov B (23.5 seg)
+// Desarme Ecofrost/Pomuni = 30 seg, Rearmado = 30 seg (solapado con R1)
+// Loop = 15 seg (7.5 m × 0.5 m/seg)
+// En régimen: R1 deposita nivel N en mesa depósito (t=0..23.5)
+//             Paralelamente R2/R3 desarman nivel anterior y rearman en loop
+//             R1 toma nivel ya procesado de mesa toma (t=23.5..47)
+//             Al llegar t=47: nuevo ciclo idéntico comienza
+
 const DEFAULT_ACTIVITIES = [
-  { id: "movB",     label: "Mov B",            sublabel: "Toma→destino",               row: 0, color: "teal",   start: 0,  duration: 10 },
-  { id: "tarimE",   label: "Tarima E",         sublabel: "retira vacía",               row: 0, color: "amber",  start: 10, duration: 10 },
-  { id: "tarimS",   label: "Tarima S",         sublabel: "posiciona",                  row: 0, color: "amber",  start: 20, duration: 10 },
-  { id: "movAant",  label: "Mov A anticipado", sublabel: "N+1→mesa ent.",             row: 0, color: "purple", start: 30, duration: 10 },
-  { id: "mesaEnt",  label: "Entrega N→Cv",    sublabel: "",                           row: 1, color: "purple", start: 0,  duration: 5  },
-  { id: "mesaRec",  label: "Recibe N+1",       sublabel: "del robot",                  row: 1, color: "purple", start: 30, duration: 10 },
-  { id: "mesaEsp",  label: "N+1 esperando",   sublabel: "",                           row: 1, color: "slate",  start: 40, duration: 17 },
-  { id: "mesaEnt2", label: "Entrega N+1→Cv", sublabel: "",                           row: 1, color: "purple", start: 57, duration: 5  },
-  { id: "cvEntra",  label: "Entra N",          sublabel: "5 seg",                      row: 2, color: "coral",  start: 0,  duration: 5  },
-  { id: "cvDesarm", label: "Desarme",          sublabel: "10 seg",                     row: 2, color: "coral",  start: 5,  duration: 10 },
-  { id: "cvEnvia",  label: "Envía loop",       sublabel: "17 seg",                     row: 2, color: "coral",  start: 15, duration: 17 },
-  { id: "cvRearm",  label: "Rearmado",         sublabel: "17 seg",                     row: 2, color: "coral",  start: 32, duration: 17 },
-  { id: "cvSale",   label: "Sale",             sublabel: "5 seg",                      row: 2, color: "coral",  start: 49, duration: 5  },
-  { id: "cvNext",   label: "Entra N+1",        sublabel: "",                           row: 2, color: "slate",  start: 57, duration: 5  },
-  { id: "loop",     label: "Cajas circulando", sublabel: "t=15 1ª sale · t=49 última", row: 3, color: "gray",   start: 15, duration: 34 },
-  { id: "etiq",     label: "Etiquetando",      sublabel: "12 cajas",                   row: 4, color: "blue",   start: 22, duration: 20 },
-  { id: "msalRec",  label: "Recibe",           sublabel: "5 seg",                      row: 5, color: "teal",   start: 49, duration: 5  },
-  { id: "msalComp", label: "Compact.",         sublabel: "3 seg",                      row: 5, color: "teal",   start: 54, duration: 3  },
-  { id: "msalList", label: "Lista",            sublabel: "robot toma",                 row: 5, color: "teal",   start: 57, duration: 10 },
+  // ── Robot R1 ──
+  { id: "r1movA",   label: "Mov A — R1",       sublabel: "pallet entrada→mesa dep.",  row: 0, color: "purple", start: 0,    duration: 24 },
+  { id: "r1movB",   label: "Mov B — R1",       sublabel: "mesa toma→pallet destino",  row: 0, color: "teal",   start: 24,   duration: 23 },
+
+  // ── Mesa depósito (entrada al desarme) ──
+  { id: "mdDep",    label: "Nivel N depositado", sublabel: "R1 libera t=24",           row: 1, color: "purple", start: 0,    duration: 24 },
+  { id: "mdEsp",    label: "Esperando desarme",  sublabel: "",                         row: 1, color: "slate",  start: 24,   duration: 6  },
+  { id: "mdDesarm", label: "Entrando a desarme", sublabel: "→ R2/R3",                  row: 1, color: "coral",  start: 30,   duration: 5  },
+  { id: "mdNxt",    label: "Nivel N+1",          sublabel: "R1 deposita t=47",         row: 1, color: "slate",  start: 47,   duration: 24 },
+
+  // ── Desarme R2/R3 (solapado, empieza cuando R1 termina Mov A aprox.) ──
+  { id: "desarm",   label: "Desarme R2/R3",    sublabel: "30 seg · Ecofrost/Pomuni",  row: 2, color: "coral",  start: 0,    duration: 30 },
+  { id: "envLoop",  label: "Envía al loop",    sublabel: "cajas una a una",            row: 2, color: "coral",  start: 30,   duration: 15 },
+  { id: "rearm",    label: "Rearmado R2/R3",   sublabel: "30 seg",                    row: 2, color: "coral",  start: 15,   duration: 30 },
+  { id: "salMesa",  label: "Sale a mesa toma", sublabel: "nivel procesado",            row: 2, color: "coral",  start: 45,   duration: 2  },
+
+  // ── Loop cinta (15 seg de recorrido) ──
+  { id: "loop",     label: "Cajas en loop",    sublabel: "7,5 m · 0,5 m/seg = 15 seg", row: 3, color: "gray",  start: 30,   duration: 30 },
+
+  // ── Etiquetadora ──
+  { id: "etiq",     label: "Etiquetando",      sublabel: "12 cajas · vel. regulada",  row: 4, color: "blue",   start: 33,   duration: 22 },
+
+  // ── Mesa toma (salida del rearmado, R1 toma de aquí) ──
+  { id: "mtLista",  label: "Nivel listo",      sublabel: "R1 toma t=24",              row: 5, color: "teal",   start: 0,    duration: 24 },
+  { id: "mtVacia",  label: "Vacía",            sublabel: "esperando rearmado",        row: 5, color: "slate",  start: 24,   duration: 23 },
+  { id: "mtNxt",    label: "Nivel N listo",    sublabel: "R1 toma t=47",              row: 5, color: "teal",   start: 47,   duration: 24 },
 ];
 
 const DEFAULT_ROWS = [
-  { id: 0, label: "Robot",        sublabel: "PL190" },
-  { id: 1, label: "Mesa entrada", sublabel: "única pos." },
-  { id: 2, label: "Celluveyor",   sublabel: "desarme/arm." },
-  { id: 3, label: "Loop",         sublabel: "vel. regulada" },
-  { id: 4, label: "Etiquetadora", sublabel: "2 etiq/caja" },
-  { id: 5, label: "Mesa salida",  sublabel: "Pos. Toma" },
+  { id: 0, label: "Robot R1",      sublabel: "Yaskawa PL190" },
+  { id: 1, label: "Mesa depósito", sublabel: "entrada desarme" },
+  { id: 2, label: "Desarme/Rearm.", sublabel: "R2 + R3 · Celluveyor" },
+  { id: 3, label: "Loop",          sublabel: "7,5 m · 0,5 m/seg" },
+  { id: 4, label: "Etiquetadora",  sublabel: "2 etiq/caja" },
+  { id: 5, label: "Mesa toma",     sublabel: "salida rearmado" },
 ];
 
 const DEFAULT_DEPS = [
-  { id: "d1", from: "cvEnvia",  to: "cvRearm",  type: "start_after_end",  offset: 0 },
-  { id: "d2", from: "movAant",  to: "mesaRec",  type: "start_together",   offset: 0 },
-  { id: "d3", from: "cvDesarm", to: "cvEnvia",  type: "start_after_end",  offset: 0 },
-  { id: "d4", from: "cvEntra",  to: "cvDesarm", type: "start_after_end",  offset: 0 },
-  { id: "d5", from: "cvRearm",  to: "cvSale",   type: "start_after_end",  offset: 0 },
-  { id: "d6", from: "cvSale",   to: "msalRec",  type: "start_together",   offset: 0 },
-  { id: "d7", from: "msalRec",  to: "msalComp", type: "start_after_end",  offset: 0 },
-  { id: "d8", from: "msalComp", to: "msalList", type: "start_after_end",  offset: 0 },
+  { id: "d1", from: "r1movA",  to: "r1movB",  type: "start_after_end",  offset: 0 },
+  { id: "d2", from: "desarm",  to: "envLoop",  type: "start_after_end",  offset: 0 },
+  { id: "d3", from: "envLoop", to: "loop",     type: "start_together",   offset: 0 },
+  { id: "d4", from: "rearm",   to: "salMesa",  type: "start_after_end",  offset: 0 },
+  { id: "d5", from: "salMesa", to: "mtNxt",    type: "start_together",   offset: 0 },
+  { id: "d6", from: "r1movB",  to: "r1movA",   type: "end_after_end",    offset: 0 },
 ];
 
 const DEFAULT_CONFIG = {
-  cycleDuration: 70,
-  title: "Ciclo Robot + Celluveyor — Watts / Frutos del Maipo",
-  subtitle: "57 seg/camada · 12 cajas · 758 cj/h · ~13,2 h para 10.000 cajas",
-  pixelsPerSec: 9,
+  cycleDuration: 47,
+  title: "Ciclo Robot R1 — Watts / Frutos del Maipo  (régimen estacionario)",
+  subtitle: "47 seg/nivel · Ecofrost/Pomuni · loop 15 seg · ~919 cj/h · ~10,9 h para 10.000 cajas",
+  pixelsPerSec: 11,
   rowHeight: 38,
 };
 
