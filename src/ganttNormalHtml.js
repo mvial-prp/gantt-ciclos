@@ -18,7 +18,7 @@ button.primary{background:#1f2430;color:#fff;border-color:#1f2430;}
 button.primary:hover{background:#333a4a;}
 button.danger{border-color:#e3b3b3;color:#a12c2c;}
 button.danger:hover{background:#fbecec;}
-.grid-outer{overflow-x:auto;border:1px solid #e5e5e8;border-radius:8px;position:relative;}
+.grid-outer{overflow:auto;max-height:65vh;border:1px solid #e5e5e8;border-radius:8px;position:relative;}
 .grid{position:relative;}
 .row{display:grid;align-items:stretch;height:32px;border-bottom:1px solid #eee;}
 .row.headerrow{position:sticky;top:0;background:#fff;z-index:3;border-bottom:1px solid #ddd;}
