@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { GANTT_NORMAL_HTML } from "./ganttNormalHtml.js";
 
 // ─── Google Fonts: Lato ───────────────────────────────────────────────────────
 const LATO_LINK = (() => {
@@ -272,7 +273,7 @@ function RowLabel({row, y, LW, RH}) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function GanttCiclico() {
+function GanttCiclico() {
   const [activities, setActivities] = useState(DEFAULT_ACTIVITIES);
   const [rows, setRows]             = useState(DEFAULT_ROWS);
   const [deps, setDeps]             = useState(DEFAULT_DEPS);
@@ -681,6 +682,49 @@ export default function GanttCiclico() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Gantt Normal (semanas de proyecto, embebido) ─────────────────────────────
+// Herramienta independiente (HTML/CSS/JS autocontenido) empotrada vía iframe.
+// Se mantiene como documento aparte para no reescribir/duplicar su lógica ya
+// probada (pintar semanas, dependencias con delay, selección múltiple, export CSV).
+function GanttNormal() {
+  return (
+    <iframe
+      title="Gantt Normal (semanas de proyecto)"
+      srcDoc={GANTT_NORMAL_HTML}
+      style={{ width: "100%", height: "calc(100vh - 40px)", border: "none", display: "block", background: "#fff" }}
+    />
+  );
+}
+
+// ─── App (selector de modo) ────────────────────────────────────────────────────
+const MODE_KEY = "gantt-app-mode";
+export default function App() {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(MODE_KEY) || "ciclico"; } catch { return "ciclico"; }
+  });
+  const chooseMode = m => {
+    setMode(m);
+    try { localStorage.setItem(MODE_KEY, m); } catch {}
+  };
+  const MODES = [["ciclico","Gantt Cíclico"],["normal","Gantt Normal"]];
+  return (
+    <div style={{fontFamily:FF}}>
+      <div style={{background:"#1C1B18",padding:"6px 16px",display:"flex",alignItems:"center",gap:8,borderBottom:"1px solid #33322E"}}>
+        <span style={{color:"#7A7870",fontSize:8.5,fontWeight:700,letterSpacing:0.5,marginRight:4}}>HERRAMIENTA:</span>
+        {MODES.map(([k,l])=>(
+          <button key={k} onClick={()=>chooseMode(k)} style={{
+            padding:"4px 12px", fontSize:10.5, fontWeight:700, border:"none", borderRadius:4,
+            cursor:"pointer", fontFamily:FF,
+            background:mode===k?"#5B4FD8":"#33322E",
+            color:mode===k?"#fff":"#B0ADA8",
+          }}>{l}</button>
+        ))}
+      </div>
+      {mode==="ciclico" ? <GanttCiclico/> : <GanttNormal/>}
     </div>
   );
 }
