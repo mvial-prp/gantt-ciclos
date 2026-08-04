@@ -90,12 +90,15 @@ button.danger:hover{background:#fbecec;}
 <body>
 <div id="wrap">
   <h1>DESLOG 253795 Watts — Carta Gantt interactiva (borrador)</h1>
-  <p class="sub">Semanas contadas desde la Orden de Compra (Semana 1 = OC). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin.</p>
+  <p class="sub">Semanas contadas desde la Orden de Compra (Semana 1 = OC). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
   <div class="toolbar">
     <label>Semanas totales <input type="number" id="weeksInput" min="8" max="80" value="40"></label>
     <button id="addModuleBtn">+ Módulo</button>
     <button id="collapseAllBtn">Agrupar todos</button>
     <button id="expandAllBtn">Desagrupar todos</button>
+    <button id="saveFileBtn" class="primary">Guardar archivo</button>
+    <button id="loadFileBtn">Cargar archivo</button>
+    <input type="file" id="loadFileInput" accept=".json" style="display:none;">
     <button id="exportBtn">Exportar a Excel</button>
     <button id="resetBtn" class="danger">Restaurar borrador inicial</button>
   </div>
@@ -600,6 +603,45 @@ function exportCSV(){
   URL.revokeObjectURL(url);
 }
 
+function flashBtn(btn, text, ms){
+  var orig = btn.textContent;
+  btn.textContent = text;
+  setTimeout(function(){ btn.textContent = orig; }, ms || 1600);
+}
+
+function saveToFile(){
+  var data = JSON.stringify(state, null, 2);
+  var blob = new Blob([data], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "DESLOG_253795_Watts_Gantt.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  flashBtn(document.getElementById("saveFileBtn"), "Guardado ✓");
+}
+
+function loadFromFile(file){
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    try {
+      var parsed = JSON.parse(ev.target.result);
+      if (!parsed || !parsed.modules || !Array.isArray(parsed.modules)) throw new Error("El archivo no tiene el formato esperado.");
+      state = migrate(parsed);
+      selected = {};
+      save();
+      render();
+      document.getElementById("weeksInput").value = state.weeks;
+      flashBtn(document.getElementById("loadFileBtn"), "Cargado ✓");
+    } catch (e) {
+      window.alert("No se pudo cargar el archivo: " + e.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
 function fillActivitySelect(sel, selectedId){
   sel.innerHTML = "";
   state.modules.forEach(function(m){
@@ -793,6 +835,15 @@ document.getElementById("collapseAllBtn").addEventListener("click", function(){
 document.getElementById("expandAllBtn").addEventListener("click", function(){
   state.modules.forEach(function(m){ m.collapsed = false; });
   save(); render();
+});
+document.getElementById("saveFileBtn").addEventListener("click", saveToFile);
+document.getElementById("loadFileBtn").addEventListener("click", function(){
+  document.getElementById("loadFileInput").click();
+});
+document.getElementById("loadFileInput").addEventListener("change", function(ev){
+  var f = ev.target.files && ev.target.files[0];
+  if (f) loadFromFile(f);
+  ev.target.value = "";
 });
 document.getElementById("exportBtn").addEventListener("click", exportCSV);
 document.getElementById("depFilterText").addEventListener("input", renderDepsOnly);
