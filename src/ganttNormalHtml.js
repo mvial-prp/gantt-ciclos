@@ -3,7 +3,7 @@ export const GANTT_NORMAL_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <style>
-:root{ color-scheme: light; }
+:root{ color-scheme: light; --pr-blue:#333F48; --pr-orange:#DE7C00; }
 *{box-sizing:border-box;}
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1f2430;background:#fff;font-size:13px;}
 #wrap{padding:16px 20px 40px;max-width:100%;}
@@ -92,14 +92,18 @@ button.danger:hover{background:#fbecec;}
 #financeBody{padding:14px 16px;}
 .finsection{margin-bottom:18px;}
 .finsection:last-child{margin-bottom:0;}
-.finsection h4{font-size:11px;font-weight:600;color:#4b5563;text-transform:uppercase;letter-spacing:.03em;margin:0 0 8px;}
+.finsection h4{font-size:11px;font-weight:600;color:#4b5563;text-transform:uppercase;letter-spacing:.03em;margin:0;}
+.finsubheader{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;margin-bottom:8px;}
+.finsubheader .chevron{width:10px;font-size:11px;}
+.finsubheader:hover h4{color:#1f2430;}
 .kpirow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
-.kpicard{background:#f7f7f8;border-radius:8px;padding:10px 12px;}
+.kpicard{background:#fff;border-radius:8px;padding:10px 12px;border:1px solid #ececec;border-left:4px solid var(--pr-orange);box-shadow:0 1px 4px rgba(51,63,72,0.08);}
 .kpicard label{display:block;font-size:10.5px;color:#6b7280;margin-bottom:4px;}
 .kpicard input[type=number]{width:100%;font-family:inherit;font-size:14px;font-weight:600;border:none;background:transparent;padding:0;color:#1f2430;}
 .kpicard input[type=number]:focus{outline:none;}
 .kpicard .kpihint{font-size:10px;color:#9aa1ac;margin-top:3px;}
-.kpicard.computed .kpival{font-size:14px;font-weight:600;color:#1f2430;}
+.kpicard.computed{border-left-color:var(--pr-blue);}
+.kpicard.computed .kpival{font-size:14px;font-weight:700;color:var(--pr-blue);}
 .kpicard.computed .kpivalempty{font-size:12px;font-weight:400;color:#9aa1ac;}
 .fintable{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;}
 .fintable th{text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:5px 6px;border-bottom:1px solid #ddd;}
@@ -119,7 +123,7 @@ button.danger:hover{background:#fbecec;}
 .fintotalrow input[type=number]{width:150px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
 .fintotalwrap{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#4b5563;white-space:nowrap;}
 .fintotalwrap input[type=number]{width:120px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
-.subcard{border:1px solid #e5e5e8;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fafbfc;}
+.subcard{border:1px solid #ececec;border-left:4px solid var(--pr-orange);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;box-shadow:0 1px 4px rgba(51,63,72,0.08);}
 .subcardhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px;}
 .subcardhead input.subname{font-family:inherit;font-size:12.5px;font-weight:600;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;flex:1 1 200px;min-width:160px;}
 .assoccombo{position:relative;min-width:180px;display:flex;align-items:center;gap:2px;}
@@ -286,8 +290,10 @@ function defaultFinance(){
     clientContract: { total: null, milestones: [] },
     materials: { total: null, milestones: [] },
     hhManualTotal: null,
+    hhRate: null,
     subcontracts: [],
-    collapsed: true
+    collapsed: true,
+    sectionsCollapsed: { hh: true }
   };
 }
 
@@ -349,8 +355,11 @@ function migrate(st){
   if (!Array.isArray(fin.clientContract.milestones)) fin.clientContract.milestones = [];
 
   if (typeof fin.hhManualTotal === "undefined") fin.hhManualTotal = null;
+  if (typeof fin.hhRate === "undefined") fin.hhRate = null;
   if (!Array.isArray(fin.subcontracts)) fin.subcontracts = [];
   if (typeof fin.collapsed === "undefined") fin.collapsed = true;
+  if (!fin.sectionsCollapsed || typeof fin.sectionsCollapsed !== "object") fin.sectionsCollapsed = { hh: true };
+  if (typeof fin.sectionsCollapsed.hh === "undefined") fin.sectionsCollapsed.hh = true;
 
   function migrateMilestone(ms){
     if (typeof ms.id === "undefined") ms.id = uid("ms");
@@ -785,12 +794,17 @@ function buildFinanceSheetHTML(){
   html += kpiRow("Costo subcontratos (suma)", subcontractsTotal());
   html += kpiRow("HH suma por actividad", hhSum());
   html += kpiRow("HH total (usado en el proyecto)", hhTotal());
+  html += kpiRow("Valor HH ($/hora)", fin.hhRate);
+  var hhTot0 = hhTotal();
+  var hhCostTotal0 = (typeof fin.hhRate === "number" && hhTot0 !== null) ? hhTot0*fin.hhRate : null;
+  html += kpiRow("Costo HH total", hhCostTotal0);
   var cf0 = cashflowByWeek();
   var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
   var egrT0 = cf0 ? cf0.egrAcum[cf0.egrAcum.length-1] : null;
   html += kpiRow("Ingresos totales (hitos)", ingT0);
   html += kpiRow("Egresos totales (hitos)", egrT0);
-  if (ingT0!==null || egrT0!==null) html += kpiRow("Diferencia final", (ingT0||0)-(egrT0||0));
+  if (ingT0!==null || egrT0!==null) html += kpiRow("Diferencia sin HH", (ingT0||0)-(egrT0||0));
+  if (cf0 && cf0.hasHHCost) html += kpiRow("Diferencia con HH", cf0.diffWithHH[cf0.diffWithHH.length-1]);
   html += '<tr><td style="border:none;"></td></tr>';
 
   html += milestonesBlockHTML("Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones);
@@ -819,15 +833,21 @@ function buildFinanceSheetHTML(){
   if (!anyHH) html += '<tr><td colspan="3" style="color:#999999;">Sin HH cargadas por actividad.</td></tr>';
   html += '<tr><td style="border:none;"></td></tr>';
 
-  html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Flujo de caja acumulado por semana</td></tr>';
-  html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].map(thCell).join("") + '</tr>';
+  html += '<tr><td colspan="8" style="font-weight:bold;font-size:12pt;border:none;">Flujo de caja acumulado por semana</td></tr>';
   var cf = cashflowByWeek();
-  if (!cf){
-    html += '<tr><td colspan="6" style="color:#999999;">Sin hitos con monto y fecha.</td></tr>';
-  } else {
+  if (cf && cf.hasHHCost){
+    html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Costo HH acumulado","Diferencia sin HH","Diferencia con HH"].map(thCell).join("") + '</tr>';
     for (var i=0;i<state.weeks;i++){
-      html += '<tr><td>' + (i+1) + '</td><td>' + cf.ing[i] + '</td><td>' + cf.egr[i] + '</td><td>' + cf.ingAcum[i] + '</td><td>' + cf.egrAcum[i] + '</td><td>' + cf.diff[i] + '</td></tr>';
+      html += '<tr><td>' + (i+1) + '</td><td>' + cf.ing[i] + '</td><td>' + cf.egr[i] + '</td><td>' + cf.ingAcum[i] + '</td><td>' + cf.egrAcum[i] + '</td><td>' + cf.hhAcum[i] + '</td><td>' + cf.diffNoHH[i] + '</td><td>' + cf.diffWithHH[i] + '</td></tr>';
     }
+  } else if (cf){
+    html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].map(thCell).join("") + '</tr>';
+    for (var i2=0;i2<state.weeks;i2++){
+      html += '<tr><td>' + (i2+1) + '</td><td>' + cf.ing[i2] + '</td><td>' + cf.egr[i2] + '</td><td>' + cf.ingAcum[i2] + '</td><td>' + cf.egrAcum[i2] + '</td><td>' + cf.diffNoHH[i2] + '</td></tr>';
+    }
+  } else {
+    html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].map(thCell).join("") + '</tr>';
+    html += '<tr><td colspan="6" style="color:#999999;">Sin hitos con % y total definidos, ni valor HH.</td></tr>';
   }
   html += '</table>';
   return html;
@@ -1138,6 +1158,33 @@ function milestoneWeek(ms){
   }
   return (typeof ms.manualWeek === "number") ? ms.manualWeek : null;
 }
+function hhCostByWeek(){
+  var n = state.weeks;
+  var rate = state.finance.hhRate;
+  var cost = new Array(n);
+  for (var z=0; z<n; z++) cost[z] = 0;
+  if (typeof rate !== "number") return { cost: cost, any: false };
+  var any = false;
+  var manual = state.finance.hhManualTotal;
+  if (typeof manual === "number"){
+    var per = (manual*rate)/n;
+    for (var w=0; w<n; w++) cost[w] += per;
+    any = true;
+  } else {
+    state.modules.forEach(function(m){
+      m.activities.forEach(function(a){
+        if (typeof a.hh === "number" && a.start!==null && a.end!==null){
+          var dur = a.end - a.start + 1;
+          var perw = (a.hh*rate)/dur;
+          for (var w=a.start; w<=a.end && w<n; w++) cost[w] += perw;
+          any = true;
+        }
+      });
+    });
+  }
+  return { cost: cost, any: any };
+}
+
 function cashflowByWeek(){
   var n = state.weeks;
   var ing = new Array(n), egr = new Array(n);
@@ -1156,10 +1203,20 @@ function cashflowByWeek(){
   process(state.finance.clientContract.total, state.finance.clientContract.milestones, true);
   process(state.finance.materials.total, state.finance.materials.milestones, false);
   state.finance.subcontracts.forEach(function(s){ process(s.amount, s.milestones, false); });
-  if (!any) return null;
-  var ingAcum = [], egrAcum = [], diff = [], ai=0, ae=0;
-  for (var i=0;i<n;i++){ ai+=ing[i]; ae+=egr[i]; ingAcum.push(ai); egrAcum.push(ae); diff.push(ai-ae); }
-  return { ing:ing, egr:egr, ingAcum:ingAcum, egrAcum:egrAcum, diff:diff };
+
+  var hhRes = hhCostByWeek();
+  var hhc = hhRes.cost, hasHHCost = hhRes.any;
+
+  if (!any && !hasHHCost) return null;
+  var ingAcum=[], egrAcum=[], hhAcum=[], diffNoHH=[], diffWithHH=[];
+  var ai=0, ae=0, ah=0;
+  for (var i=0;i<n;i++){
+    ai+=ing[i]; ae+=egr[i]; ah+=hhc[i];
+    ingAcum.push(ai); egrAcum.push(ae); hhAcum.push(ah);
+    diffNoHH.push(ai-ae);
+    diffWithHH.push(ai-ae-ah);
+  }
+  return { ing:ing, egr:egr, hhc:hhc, ingAcum:ingAcum, egrAcum:egrAcum, hhAcum:hhAcum, diffNoHH:diffNoHH, diffWithHH:diffWithHH, hasHHCost:hasHHCost };
 }
 
 // ---- searchable "actividad o módulo" combobox ----
@@ -1250,23 +1307,32 @@ function mountCashflowChart(cfData){
   var labels = [];
   for (var i=0;i<state.weeks;i++) labels.push(String(i+1));
   if (financeChart){ financeChart.destroy(); financeChart = null; }
+  var datasets = [
+    { label:"Ingresos acumulados", data: cfData.ingAcum, borderColor:"#2e7d43", backgroundColor:"rgba(46,125,67,0.08)", tension:0.15, pointRadius:0, borderWidth:2 },
+    { label:"Egresos acumulados", data: cfData.egrAcum, borderColor:"#c0392b", backgroundColor:"rgba(192,57,43,0.08)", tension:0.15, pointRadius:0, borderWidth:2 },
+    { label:"Diferencia sin HH", data: cfData.diffNoHH, borderColor:"#2b6cb0", backgroundColor:"rgba(43,108,176,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[4,3] }
+  ];
+  if (cfData.hasHHCost){
+    datasets.push({ label:"Costo HH acumulado", data: cfData.hhAcum, borderColor:"#DE7C00", backgroundColor:"rgba(222,124,0,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[2,2] });
+    datasets.push({ label:"Diferencia con HH", data: cfData.diffWithHH, borderColor:"#7F77DD", backgroundColor:"rgba(127,119,221,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[6,3] });
+  }
   financeChart = new Chart(canvas.getContext("2d"), {
     type: "line",
-    data: {
-      labels: labels,
-      datasets: [
-        { label:"Ingresos acumulados", data: cfData.ingAcum, borderColor:"#2e7d43", backgroundColor:"rgba(46,125,67,0.08)", tension:0.15, pointRadius:0, borderWidth:2 },
-        { label:"Egresos acumulados", data: cfData.egrAcum, borderColor:"#c0392b", backgroundColor:"rgba(192,57,43,0.08)", tension:0.15, pointRadius:0, borderWidth:2 },
-        { label:"Diferencia", data: cfData.diff, borderColor:"#2b6cb0", backgroundColor:"rgba(43,108,176,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[4,3] }
-      ]
-    },
+    data: { labels: labels, datasets: datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
+      interaction: { mode:"index", intersect:false },
       scales: {
         x: { title: { display:true, text:"Semana", font:{size:10} }, ticks:{font:{size:9}} },
         y: { ticks: { callback: function(v){ return fmtNum(v); }, font:{size:9} } }
       },
-      plugins: { legend: { position:"bottom", labels:{ boxWidth:12, font:{size:10} } } }
+      plugins: {
+        legend: { position:"bottom", labels:{ boxWidth:12, font:{size:10} } },
+        tooltip: {
+          mode:"index", intersect:false,
+          callbacks: { label: function(ctx){ return ctx.dataset.label + ": $ " + fmtNum(ctx.parsed.y); } }
+        }
+      }
     }
   });
 }
@@ -1358,6 +1424,58 @@ function buildMilestonesTable(total, milestones, onAdd, emptyHint){
   return wrap;
 }
 
+function collapsibleSectionHeader(key, title){
+  var fin = state.finance;
+  if (!fin.sectionsCollapsed) fin.sectionsCollapsed = {};
+  var collapsed = !!fin.sectionsCollapsed[key];
+  var head = el("div","finsubheader");
+  head.appendChild(el("span","chevron",{text: collapsed ? "▸" : "▾"}));
+  head.appendChild(el("h4",null,{text:title}));
+  head.addEventListener("click", function(){
+    fin.sectionsCollapsed[key] = !collapsed;
+    save(); renderFinance();
+  });
+  return { head: head, collapsed: collapsed };
+}
+
+function setComputedCardValue(id, value, emptyText){
+  var v = document.getElementById(id);
+  if (!v) return;
+  if (value === null){ v.className = "kpivalempty"; v.textContent = emptyText; }
+  else { v.className = "kpival"; v.textContent = "$ " + fmtNum(value); }
+}
+
+// Lightweight refresh for numbers that depend on HH/rate, without tearing down
+// the tables (a full renderFinance() rebuild mid-edit breaks Tab/focus).
+function refreshFinanceComputed(){
+  var fin = state.finance;
+  var computedHH = hhSum();
+  var hint = document.getElementById("hhSumHint");
+  if (hint) hint.textContent = (computedHH===null ? "Sin HH por actividad cargadas." : ("Suma por actividad: " + computedHH + " hh.")) + " Deja vacío para usar la suma.";
+
+  var hhT = hhTotal();
+  var rate = fin.hhRate;
+  var hhCost = (typeof rate === "number" && hhT !== null) ? hhT*rate : null;
+  setComputedCardValue("kpiCostoHHVal", hhCost, "— sin valor HH");
+
+  var cfData = cashflowByWeek();
+  var summary = document.getElementById("finCashSummary");
+  if (summary){
+    summary.innerHTML = "";
+    var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
+    var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
+    summary.appendChild(statSpan("Ingresos totales", ingTotal));
+    summary.appendChild(statSpan("Egresos totales", egrTotal));
+    summary.appendChild(statSpan("Diferencia sin HH", (ingTotal||0)-(egrTotal||0)));
+    if (cfData && cfData.hasHHCost){
+      summary.appendChild(statSpan("Costo HH total", cfData.hhAcum[cfData.hhAcum.length-1]));
+      summary.appendChild(statSpan("Diferencia con HH", cfData.diffWithHH[cfData.diffWithHH.length-1]));
+    }
+  }
+  if (cfData) mountCashflowChart(cfData);
+  else if (financeChart){ financeChart.destroy(); financeChart = null; }
+}
+
 function renderFinance(){
   var body = document.getElementById("financeBody");
   var fin = state.finance;
@@ -1367,153 +1485,208 @@ function renderFinance(){
   body.style.display = "block";
   body.innerHTML = "";
 
-  // --- KPIs ---
-  var kpiSection = el("div","finsection");
-  kpiSection.appendChild(el("h4",null,{text:"Resumen"}));
-  var kpiRow = el("div","kpirow");
-
-  function computedCard(label, value, emptyText){
-    var c = el("div","kpicard computed");
-    c.appendChild(el("label",null,{text:label}));
-    c.appendChild(value===null ? el("div","kpivalempty",{text:emptyText}) : el("div","kpival",{text:"$ "+fmtNum(value)}));
-    return c;
-  }
-
-  kpiRow.appendChild(computedCard("Total contrato cliente", fin.clientContract.total, "— sin definir"));
-  kpiRow.appendChild(computedCard("Costo materiales total", fin.materials.total, "— sin definir"));
-  var subTotal = subcontractsTotal();
-  kpiRow.appendChild(computedCard("Costo subcontratos (suma)", subTotal, "— sin subcontratos"));
-
-  var computedHH = hhSum();
-  var hhCard = el("div","kpicard");
-  hhCard.appendChild(el("label",null,{text:"HH total del proyecto"}));
-  var hhInp = el("input"); hhInp.type="number";
-  hhInp.placeholder = computedHH===null ? "—" : String(computedHH);
-  hhInp.value = fin.hhManualTotal===null?"":fin.hhManualTotal;
-  hhInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.hhManualTotal = v===""?null:parseFloat(v); save(); renderFinance(); });
-  hhCard.appendChild(hhInp);
-  var hhHintTxt = computedHH===null ? "Sin HH por actividad cargadas." : ("Suma por actividad: " + computedHH + " hh.");
-  hhCard.appendChild(el("div","kpihint",{text: hhHintTxt + " Deja vacío para usar la suma."}));
-  kpiRow.appendChild(hhCard);
-
   var cfData = cashflowByWeek();
-  var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
-  var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
 
-  kpiRow.appendChild(computedCard("Ingresos totales (hitos)", ingTotal, "— sin hitos de cobro"));
-  kpiRow.appendChild(computedCard("Egresos totales (hitos)", egrTotal, "— sin hitos de pago"));
+  // --- Resumen ---
+  var kpiSection = el("div","finsection");
+  var kpiHdr = collapsibleSectionHeader("resumen", "Resumen");
+  kpiSection.appendChild(kpiHdr.head);
+  if (!kpiHdr.collapsed){
+    var kpiRow = el("div","kpirow");
 
-  kpiSection.appendChild(kpiRow);
-  kpiSection.appendChild(el("div","kpihint",{text:"Los totales de contrato/materiales/subcontratos se ingresan en sus propias secciones más abajo."}));
+    function computedCard(label, value, emptyText, valId){
+      var c = el("div","kpicard computed");
+      c.appendChild(el("label",null,{text:label}));
+      var valEl = value===null ? el("div","kpivalempty",{text:emptyText}) : el("div","kpival",{text:"$ "+fmtNum(value)});
+      if (valId) valEl.id = valId;
+      c.appendChild(valEl);
+      return c;
+    }
+
+    kpiRow.appendChild(computedCard("Total contrato cliente", fin.clientContract.total, "— sin definir"));
+    kpiRow.appendChild(computedCard("Costo materiales total", fin.materials.total, "— sin definir"));
+    var subTotal = subcontractsTotal();
+    kpiRow.appendChild(computedCard("Costo subcontratos (suma)", subTotal, "— sin subcontratos"));
+
+    var computedHH = hhSum();
+    var hhCard = el("div","kpicard");
+    hhCard.appendChild(el("label",null,{text:"HH total del proyecto"}));
+    var hhInp = el("input"); hhInp.type="number";
+    hhInp.placeholder = computedHH===null ? "—" : String(computedHH);
+    hhInp.value = fin.hhManualTotal===null?"":fin.hhManualTotal;
+    hhInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.hhManualTotal = v===""?null:parseFloat(v); save(); renderFinance(); });
+    hhCard.appendChild(hhInp);
+    var hhHintTxt = computedHH===null ? "Sin HH por actividad cargadas." : ("Suma por actividad: " + computedHH + " hh.");
+    var hhHint = el("div","kpihint",{text: hhHintTxt + " Deja vacío para usar la suma."});
+    hhHint.id = "hhSumHint";
+    hhCard.appendChild(hhHint);
+    kpiRow.appendChild(hhCard);
+
+    var rateCard = el("div","kpicard");
+    rateCard.appendChild(el("label",null,{text:"Valor HH ($/hora)"}));
+    var rateInp = el("input"); rateInp.type="number"; rateInp.placeholder="—";
+    rateInp.value = fin.hhRate===null?"":fin.hhRate;
+    rateInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.hhRate = v===""?null:parseFloat(v); save(); renderFinance(); });
+    rateCard.appendChild(rateInp);
+    rateCard.appendChild(el("div","kpihint",{text:"Si lo defines, el costo de HH se suma como línea aparte en el flujo de caja."}));
+    kpiRow.appendChild(rateCard);
+
+    var hhT = hhTotal();
+    var hhCostVal = (typeof fin.hhRate === "number" && hhT !== null) ? hhT*fin.hhRate : null;
+    kpiRow.appendChild(computedCard("Costo HH total", hhCostVal, "— sin valor HH", "kpiCostoHHVal"));
+
+    var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
+    var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
+    kpiRow.appendChild(computedCard("Ingresos totales (hitos)", ingTotal, "— sin hitos de cobro"));
+    kpiRow.appendChild(computedCard("Egresos totales (hitos)", egrTotal, "— sin hitos de pago"));
+
+    kpiSection.appendChild(kpiRow);
+    kpiSection.appendChild(el("div","kpihint",{text:"Los totales de contrato/materiales/subcontratos se ingresan en sus propias secciones más abajo."}));
+  }
   body.appendChild(kpiSection);
 
   // --- Contrato con cliente ---
   var clientSection = el("div","finsection");
-  clientSection.appendChild(el("h4",null,{text:"Contrato con cliente — hitos de cobro"}));
-  clientSection.appendChild(el("div","kpihint",{text:'Define el monto total del contrato y el % que corresponde a cada hito. Ej: "Facturar 30% previo a envío".'}));
-  clientSection.appendChild(buildTotalRow("Total contrato cliente:", fin.clientContract.total, function(v){ fin.clientContract.total=v; save(); renderFinance(); }));
-  clientSection.appendChild(buildMilestonesTable(fin.clientContract.total, fin.clientContract.milestones, function(){
-    fin.clientContract.milestones.push(newMilestone()); save(); renderFinance();
-  }));
+  var clientHdr = collapsibleSectionHeader("cliente", "Contrato con cliente — hitos de cobro");
+  clientSection.appendChild(clientHdr.head);
+  if (!clientHdr.collapsed){
+    clientSection.appendChild(el("div","kpihint",{text:'Define el monto total del contrato y el % que corresponde a cada hito. Ej: "Facturar 30% previo a envío".'}));
+    clientSection.appendChild(buildTotalRow("Total contrato cliente:", fin.clientContract.total, function(v){ fin.clientContract.total=v; save(); renderFinance(); }));
+    clientSection.appendChild(buildMilestonesTable(fin.clientContract.total, fin.clientContract.milestones, function(){
+      fin.clientContract.milestones.push(newMilestone()); save(); renderFinance();
+    }));
+  }
   body.appendChild(clientSection);
 
   // --- Materiales ---
   var matSection = el("div","finsection");
-  matSection.appendChild(el("h4",null,{text:"Materiales — hitos de pago"}));
-  matSection.appendChild(el("div","kpihint",{text:"Define el costo total de materiales y el % que corresponde a cada pago."}));
-  matSection.appendChild(buildTotalRow("Costo materiales total:", fin.materials.total, function(v){ fin.materials.total=v; save(); renderFinance(); }));
-  matSection.appendChild(buildMilestonesTable(fin.materials.total, fin.materials.milestones, function(){
-    fin.materials.milestones.push(newMilestone()); save(); renderFinance();
-  }));
+  var matHdr = collapsibleSectionHeader("materiales", "Materiales — hitos de pago");
+  matSection.appendChild(matHdr.head);
+  if (!matHdr.collapsed){
+    matSection.appendChild(el("div","kpihint",{text:"Define el costo total de materiales y el % que corresponde a cada pago."}));
+    matSection.appendChild(buildTotalRow("Costo materiales total:", fin.materials.total, function(v){ fin.materials.total=v; save(); renderFinance(); }));
+    matSection.appendChild(buildMilestonesTable(fin.materials.total, fin.materials.milestones, function(){
+      fin.materials.milestones.push(newMilestone()); save(); renderFinance();
+    }));
+  }
   body.appendChild(matSection);
 
   // --- Subcontratos ---
   var subSection = el("div","finsection");
-  subSection.appendChild(el("h4",null,{text:"Subcontratos"}));
-  subSection.appendChild(el("div","kpihint",{text:'Crea el subcontrato con su monto total y agrega sus hitos de pago (%) directamente aquí. Ej: "Pagar 50% de anticipo previo a inicio del diseño".'}));
-  if (!fin.subcontracts.length){
-    subSection.appendChild(el("div","empty",{text:"Sin subcontratos agregados."}));
-  } else {
-    fin.subcontracts.forEach(function(s){
-      var card = el("div","subcard");
-      var cardHead = el("div","subcardhead");
-      var nameInp = el("input","subname"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
-      nameInp.addEventListener("change", function(ev){ s.name=ev.target.value; save(); });
-      cardHead.appendChild(nameInp);
+  var subHdr = collapsibleSectionHeader("subcontratos", "Subcontratos");
+  subSection.appendChild(subHdr.head);
+  if (!subHdr.collapsed){
+    subSection.appendChild(el("div","kpihint",{text:'Crea el subcontrato con su monto total y agrega sus hitos de pago (%) directamente aquí. Ej: "Pagar 50% de anticipo previo a inicio del diseño".'}));
+    if (!fin.subcontracts.length){
+      subSection.appendChild(el("div","empty",{text:"Sin subcontratos agregados."}));
+    } else {
+      fin.subcontracts.forEach(function(s){
+        var card = el("div","subcard");
+        var cardHead = el("div","subcardhead");
+        var nameInp = el("input","subname"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
+        nameInp.addEventListener("change", function(ev){ s.name=ev.target.value; save(); });
+        cardHead.appendChild(nameInp);
 
-      var amtWrap = el("span","fintotalwrap");
-      amtWrap.appendChild(el("span","fintotallabel",{text:"Monto total:"}));
-      var amtInp = el("input"); amtInp.type="number"; amtInp.value=s.amount===null?"":s.amount; amtInp.placeholder="0";
-      amtInp.addEventListener("change", function(ev){ var v=ev.target.value; s.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
-      amtWrap.appendChild(amtInp);
-      cardHead.appendChild(amtWrap);
+        var amtWrap = el("span","fintotalwrap");
+        amtWrap.appendChild(el("span","fintotallabel",{text:"Monto total:"}));
+        var amtInp = el("input"); amtInp.type="number"; amtInp.value=s.amount===null?"":s.amount; amtInp.placeholder="0";
+        amtInp.addEventListener("change", function(ev){ var v=ev.target.value; s.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
+        amtWrap.appendChild(amtInp);
+        cardHead.appendChild(amtWrap);
 
-      var delSubBtn = el("button","danger",{text:"Eliminar subcontrato"});
-      delSubBtn.addEventListener("click", function(ss){ return function(){
-        if (!confirmish(delSubBtn, "eliminar subcontrato")) return;
-        fin.subcontracts = fin.subcontracts.filter(function(x){return x!==ss;});
-        save(); renderFinance();
-      }; }(s));
-      cardHead.appendChild(delSubBtn);
-      card.appendChild(cardHead);
+        var delSubBtn = el("button","danger",{text:"Eliminar subcontrato"});
+        delSubBtn.addEventListener("click", function(ss){ return function(){
+          if (!confirmish(delSubBtn, "eliminar subcontrato")) return;
+          fin.subcontracts = fin.subcontracts.filter(function(x){return x!==ss;});
+          save(); renderFinance();
+        }; }(s));
+        cardHead.appendChild(delSubBtn);
+        card.appendChild(cardHead);
 
-      card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
-        s.milestones.push(newMilestone()); save(); renderFinance();
-      }, "Sin hitos de pago para este subcontrato todavía."));
+        card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
+          s.milestones.push(newMilestone()); save(); renderFinance();
+        }, "Sin hitos de pago para este subcontrato todavía."));
 
-      subSection.appendChild(card);
-    });
+        subSection.appendChild(card);
+      });
+    }
+    var addSubBtn = el("button","finaddbtn",{text:"+ Agregar subcontrato"});
+    addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, milestones:[]}); save(); renderFinance(); });
+    subSection.appendChild(addSubBtn);
   }
-  var addSubBtn = el("button","finaddbtn",{text:"+ Agregar subcontrato"});
-  addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, milestones:[]}); save(); renderFinance(); });
-  subSection.appendChild(addSubBtn);
   body.appendChild(subSection);
 
   // --- HH por actividad ---
   var hhSection = el("div","finsection");
-  hhSection.appendChild(el("h4",null,{text:"HH por actividad (opcional)"}));
-  var allActs = allActivitiesFlat();
-  if (!allActs.length){
-    hhSection.appendChild(el("div","empty",{text:"No hay actividades todavía."}));
-  } else {
-    var hhTable = el("table","fintable");
-    var hhThead = el("thead"); var hhHtr = el("tr");
-    hhHtr.appendChild(el("th",null,{text:"Módulo › Actividad"}));
-    hhHtr.appendChild(el("th",null,{text:"HH"}));
-    hhThead.appendChild(hhHtr); hhTable.appendChild(hhThead);
-    var hhTbody = el("tbody");
-    allActs.forEach(function(entry){
-      var tr = el("tr");
-      tr.appendChild(el("td",null,{text: entry.mod.name + " › " + entry.act.name}));
-      var tdHH = el("td"); var hhi = el("input"); hhi.type="number"; hhi.value = entry.act.hh===null?"":entry.act.hh; hhi.placeholder="—";
-      hhi.addEventListener("change", function(aa){ return function(ev){ var v=ev.target.value; aa.hh = v===""?null:parseFloat(v); save(); renderFinance(); }; }(entry.act));
-      tdHH.appendChild(hhi); tr.appendChild(tdHH);
-      hhTbody.appendChild(tr);
-    });
-    hhTable.appendChild(hhTbody);
-    hhSection.appendChild(hhTable);
+  var hhHdr = collapsibleSectionHeader("hh", "HH por actividad (opcional)");
+  hhSection.appendChild(hhHdr.head);
+  if (!hhHdr.collapsed){
+    var allActs = allActivitiesFlat();
+    if (!allActs.length){
+      hhSection.appendChild(el("div","empty",{text:"No hay actividades todavía."}));
+    } else {
+      hhSection.appendChild(el("div","kpihint",{text:"Tip: usa Tab o Enter para pasar al siguiente campo — los totales de arriba se actualizan solos, sin perder tu lugar."}));
+      var hhTable = el("table","fintable");
+      var hhThead = el("thead"); var hhHtr = el("tr");
+      hhHtr.appendChild(el("th",null,{text:"Módulo › Actividad"}));
+      hhHtr.appendChild(el("th",null,{text:"HH"}));
+      hhThead.appendChild(hhHtr); hhTable.appendChild(hhThead);
+      var hhTbody = el("tbody");
+      var hhInputs = [];
+      allActs.forEach(function(entry){
+        var tr = el("tr");
+        tr.appendChild(el("td",null,{text: entry.mod.name + " › " + entry.act.name}));
+        var tdHH = el("td"); var hhi = el("input"); hhi.type="number"; hhi.value = entry.act.hh===null?"":entry.act.hh; hhi.placeholder="—";
+        hhi.addEventListener("change", function(aa){ return function(ev){
+          var v=ev.target.value; aa.hh = v===""?null:parseFloat(v); save();
+          refreshFinanceComputed();
+        }; }(entry.act));
+        hhi.addEventListener("keydown", function(ev){
+          if (ev.key === "Enter"){
+            ev.preventDefault();
+            var idx = hhInputs.indexOf(ev.target);
+            var next = hhInputs[idx+1];
+            if (next){ next.focus(); next.select(); } else { ev.target.blur(); }
+          }
+        });
+        tdHH.appendChild(hhi); tr.appendChild(tdHH);
+        hhInputs.push(hhi);
+        hhTbody.appendChild(tr);
+      });
+      hhTable.appendChild(hhTbody);
+      hhSection.appendChild(hhTable);
+    }
   }
   body.appendChild(hhSection);
 
   // --- Flujo de caja ---
   var chartSection = el("div","finsection");
-  chartSection.appendChild(el("h4",null,{text:"Flujo de caja acumulado"}));
-  if (!cfData){
-    chartSection.appendChild(el("div","empty",{text:"Agrega hitos con monto y una actividad (o semana manual) para ver el flujo de caja."}));
-  } else {
-    var wrap = el("div","chartwrap");
-    var canvas = el("canvas"); canvas.id = "cashflowCanvas";
-    wrap.appendChild(canvas);
-    chartSection.appendChild(wrap);
-    var summary = el("div","fincashsummary");
-    summary.appendChild(statSpan("Ingresos totales", ingTotal));
-    summary.appendChild(statSpan("Egresos totales", egrTotal));
-    summary.appendChild(statSpan("Diferencia final", (ingTotal||0)-(egrTotal||0)));
-    chartSection.appendChild(summary);
+  var chartHdr = collapsibleSectionHeader("flujo", "Flujo de caja acumulado");
+  chartSection.appendChild(chartHdr.head);
+  if (!chartHdr.collapsed){
+    if (!cfData){
+      chartSection.appendChild(el("div","empty",{text:"Agrega hitos con % y un total definido (o valor HH) para ver el flujo de caja."}));
+    } else {
+      var wrap = el("div","chartwrap");
+      var canvas = el("canvas"); canvas.id = "cashflowCanvas";
+      wrap.appendChild(canvas);
+      chartSection.appendChild(wrap);
+      var summary = el("div","fincashsummary"); summary.id = "finCashSummary";
+      var ingTotal2 = cfData.ingAcum[cfData.ingAcum.length-1];
+      var egrTotal2 = cfData.egrAcum[cfData.egrAcum.length-1];
+      summary.appendChild(statSpan("Ingresos totales", ingTotal2));
+      summary.appendChild(statSpan("Egresos totales", egrTotal2));
+      summary.appendChild(statSpan("Diferencia sin HH", ingTotal2-egrTotal2));
+      if (cfData.hasHHCost){
+        summary.appendChild(statSpan("Costo HH total", cfData.hhAcum[cfData.hhAcum.length-1]));
+        summary.appendChild(statSpan("Diferencia con HH", cfData.diffWithHH[cfData.diffWithHH.length-1]));
+      }
+      chartSection.appendChild(summary);
+    }
   }
   body.appendChild(chartSection);
 
-  if (cfData) mountCashflowChart(cfData);
+  if (!chartHdr.collapsed && cfData) mountCashflowChart(cfData);
 }
 
 document.getElementById("weeksInput").addEventListener("change", function(ev){
