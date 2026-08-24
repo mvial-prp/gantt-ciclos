@@ -85,6 +85,35 @@ button.danger:hover{background:#fbecec;}
 .legend span{display:inline-flex;align-items:center;gap:4px;}
 .legenddot{width:8px;height:8px;border-radius:2px;}
 .empty{color:#9aa1ac;font-size:12px;padding:6px 8px;}
+.financebox{margin-top:16px;border:1px solid #e5e5e8;border-radius:8px;overflow:hidden;}
+.financeheader{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#f7f7f8;cursor:pointer;user-select:none;}
+.financeheader h3{font-size:12px;font-weight:600;color:#1f2430;text-transform:uppercase;letter-spacing:.03em;}
+.finhint{font-size:11px;color:#9aa1ac;font-weight:400;text-transform:none;letter-spacing:0;}
+#financeBody{padding:14px 16px;}
+.finsection{margin-bottom:18px;}
+.finsection:last-child{margin-bottom:0;}
+.finsection h4{font-size:11px;font-weight:600;color:#4b5563;text-transform:uppercase;letter-spacing:.03em;margin:0 0 8px;}
+.kpirow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.kpicard{background:#f7f7f8;border-radius:8px;padding:10px 12px;}
+.kpicard label{display:block;font-size:10.5px;color:#6b7280;margin-bottom:4px;}
+.kpicard input[type=number]{width:100%;font-family:inherit;font-size:14px;font-weight:600;border:none;background:transparent;padding:0;color:#1f2430;}
+.kpicard input[type=number]:focus{outline:none;}
+.kpicard .kpihint{font-size:10px;color:#9aa1ac;margin-top:3px;}
+.kpicard.computed .kpival{font-size:14px;font-weight:600;color:#1f2430;}
+.kpicard.computed .kpivalempty{font-size:12px;font-weight:400;color:#9aa1ac;}
+.fintable{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;}
+.fintable th{text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:5px 6px;border-bottom:1px solid #ddd;}
+.fintable td{padding:4px 6px;border-bottom:1px solid #f0f0f1;vertical-align:middle;}
+.fintable input[type=text], .fintable input[type=number], .fintable select{font-family:inherit;font-size:11.5px;padding:3px 5px;border:1px solid #d1d5db;border-radius:4px;background:#fff;width:100%;}
+.fintable input[type=number]{width:100px;}
+.fintable select{max-width:230px;}
+.fintable td.actioncell{text-align:right;white-space:nowrap;}
+.fintable td.actioncell button{padding:2px 7px;}
+.fintable .weektag{font-size:10.5px;color:#6b7280;}
+.chartwrap{position:relative;height:220px;}
+.finaddbtn{margin-top:2px;}
+.fincashsummary{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#4b5563;margin-top:8px;}
+.fincashsummary b{color:#1f2430;}
 </style>
 </head>
 <body>
@@ -142,8 +171,17 @@ button.danger:hover{background:#fbecec;}
     </div>
     <div id="depsEmpty" class="empty" style="display:none;"></div>
   </div>
+  <div class="financebox">
+    <div class="financeheader" id="financeHeader">
+      <span class="chevron" id="financeChevron">▸</span>
+      <h3 style="margin:0;">Financiero (opcional)</h3>
+      <span class="finhint">costos, HH, hitos de cobro/pago a proveedores y flujo de caja — nada de esto es obligatorio</span>
+    </div>
+    <div id="financeBody" style="display:none;"></div>
+  </div>
   <div class="legend" id="legend"></div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 <script>
 var LABEL_W = 280;
 var COL_W = 26;
@@ -157,7 +195,7 @@ function defaultState(){
   colorIdx = 0;
   function mod(name, color, acts){
     return { id: uid("mod"), name: name, color: color, collapsed:false, activities: acts.map(function(a){
-      return { id: uid("act"), name: a[0], start: a[1], end: a[2] };
+      return { id: uid("act"), name: a[0], start: a[1], end: a[2], hh: null };
     })};
   }
   var m_design   = mod("Ingeniería / Diseño general", nextColor(), [["Diseño general del proyecto (layout, interfaces)",0,3]]);
@@ -223,7 +261,17 @@ function defaultState(){
   dep(findAct(m_integ,"Transporte e instalación en planta"), findAct(m_integ,"SAT (puesta en marcha)"));
   dep(findAct(m_integ,"SAT (puesta en marcha)"), findAct(m_integ,"Documentación"));
 
-  return { weeks: 40, modules: modules, deps: deps };
+  return { weeks: 40, modules: modules, deps: deps, finance: defaultFinance() };
+}
+
+function defaultFinance(){
+  return {
+    materialsCost: null,
+    hhManualTotal: null,
+    subcontracts: [],
+    milestones: [],
+    collapsed: true
+  };
 }
 
 var STORAGE_KEY = "deslog253795-watts-gantt-v2";
@@ -240,6 +288,7 @@ function migrate(st){
       }
       if (typeof a.start === "undefined") a.start = null;
       if (typeof a.end === "undefined") a.end = null;
+      if (typeof a.hh === "undefined") a.hh = null;
     });
   });
   (st.deps||[]).forEach(function(d){
@@ -247,6 +296,24 @@ function migrate(st){
     if (typeof d.delay !== "number") d.delay = 0;
   });
   if (!st.deps) st.deps = [];
+  if (!st.finance) st.finance = defaultFinance();
+  var fin = st.finance;
+  if (typeof fin.materialsCost === "undefined") fin.materialsCost = null;
+  if (typeof fin.hhManualTotal === "undefined") fin.hhManualTotal = null;
+  if (!Array.isArray(fin.subcontracts)) fin.subcontracts = [];
+  if (!Array.isArray(fin.milestones)) fin.milestones = [];
+  if (typeof fin.collapsed === "undefined") fin.collapsed = true;
+  fin.subcontracts.forEach(function(s){
+    if (typeof s.name === "undefined") s.name = "";
+    if (typeof s.amount !== "number") s.amount = null;
+  });
+  fin.milestones.forEach(function(ms){
+    if (!ms.type) ms.type = "cobro";
+    if (typeof ms.desc === "undefined") ms.desc = "";
+    if (typeof ms.actId === "undefined") ms.actId = null;
+    if (!ms.moment) ms.moment = "start";
+    if (typeof ms.amount !== "number") ms.amount = null;
+  });
   return st;
 }
 
@@ -395,7 +462,7 @@ function render(){
     var addA = el("button","icobtn add",{text:"+", title:"Agregar actividad"});
     addA.addEventListener("click", function(mm){ return function(ev){
       ev.stopPropagation();
-      mm.activities.push({ id: uid("act"), name: "Nueva actividad", start:null, end:null });
+      mm.activities.push({ id: uid("act"), name: "Nueva actividad", start:null, end:null, hh:null });
       save(); render();
     }; }(m));
     mlabel.appendChild(addA);
@@ -510,6 +577,7 @@ function render(){
   renderDeps(vio);
   renderLegend();
   renderSelBar();
+  renderFinance();
 }
 
 function renderSelBar(){
@@ -557,46 +625,176 @@ function hexToTint(hex){
 
 function actLabel(entry){ return entry.mod.name + " — " + entry.act.name; }
 
-function csvEsc(v){
+function xlsEsc(v){
   v = (v===null || typeof v==="undefined") ? "" : String(v);
-  if (/[",\\n;]/.test(v)) v = '"' + v.replace(/"/g,'""') + '"';
-  return v;
+  return v.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
-function exportCSV(){
-  var vio = computeViolations();
-  var lines = [];
-  lines.push(["Módulo","Actividad","Semana inicio","Semana fin","Duración (semanas)"].map(csvEsc).join(","));
+var TH_STYLE = "background:#1f2430;color:#ffffff;font-weight:bold;padding:4px 6px;";
+function thCell(text){ return '<td style="' + TH_STYLE + '">' + xlsEsc(text) + '</td>'; }
+
+function buildGanttSheetHTML(){
+  var html = '<table border="1" cellspacing="0" cellpadding="2" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
+  html += '<tr><td colspan="3" style="font-size:14pt;font-weight:bold;border:none;">DESLOG 253795 Watts — Carta Gantt</td></tr>';
+  html += '<tr><td colspan="3" style="font-style:italic;color:#666666;border:none;">Semanas contadas desde la Orden de Compra (Semana 1 = OC)</td></tr>';
+  html += '<tr><td style="border:none;"></td></tr>';
+  html += '<tr>' + thCell("Módulo") + thCell("Actividad") + '<td style="' + TH_STYLE + 'text-align:center;">Dur. (sem)</td>';
+  for (var w=0; w<state.weeks; w++){
+    html += '<td style="' + TH_STYLE + 'text-align:center;width:16px;">' + (w+1) + '</td>';
+  }
+  html += '</tr>';
+
   state.modules.forEach(function(m){
+    var span = moduleSpan(m);
+    var tint = hexToTint(m.color);
+    html += '<tr>';
+    html += '<td colspan="3" style="background:' + tint + ';font-weight:bold;">' + xlsEsc(m.name) + (span ? " (" + span.dur + " sem)" : "") + '</td>';
+    for (var w2=0; w2<state.weeks; w2++){
+      var inSpan = span && w2>=span.start && w2<=span.end;
+      html += '<td style="background:' + (inSpan?tint:"#ffffff") + ';"></td>';
+    }
+    html += '</tr>';
+
     m.activities.forEach(function(a){
-      lines.push([
-        m.name, a.name,
-        a.start===null ? "" : (a.start+1),
-        a.end===null ? "" : (a.end+1),
-        durationOf(a)===null ? "" : durationOf(a)
-      ].map(csvEsc).join(","));
+      var dur = durationOf(a);
+      html += '<tr><td></td><td>' + xlsEsc(a.name) + '</td><td style="text-align:center;">' + (dur===null?"":dur) + '</td>';
+      for (var w3=0; w3<state.weeks; w3++){
+        var filled = a.start!==null && w3>=a.start && w3<=a.end;
+        html += '<td style="background:' + (filled?m.color:"#ffffff") + ';"></td>';
+      }
+      html += '</tr>';
     });
   });
-  lines.push("");
-  lines.push(["Dependencias"].map(csvEsc).join(","));
-  lines.push(["Origen","Tipo","Delay (días)","Destino","Estado"].map(csvEsc).join(","));
-  state.deps.forEach(function(d){
-    var f = findActivity(d.from), t = findActivity(d.to);
-    if (!f || !t) return;
-    var estado = vio.violated[d.id] ? ("Incumple: " + vio.violated[d.id]) : "Cumple";
-    lines.push([
-      f.mod.name + " — " + f.act.name,
-      typeLabel(d.type),
-      d.delay,
-      t.mod.name + " — " + t.act.name,
-      estado
-    ].map(csvEsc).join(","));
+  html += '</table>';
+  return html;
+}
+
+function buildFinanceSheetHTML(){
+  var fin = state.finance;
+  var html = '<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
+  html += '<tr><td colspan="6" style="font-size:14pt;font-weight:bold;border:none;">Financiero</td></tr>';
+  html += '<tr><td style="border:none;"></td></tr>';
+
+  function kpiRow(label, value){
+    return '<tr><td style="font-weight:bold;background:#f0f1f3;">' + xlsEsc(label) + '</td><td>' + (value===null||typeof value==="undefined"?"":value) + '</td><td colspan="4" style="border:none;"></td></tr>';
+  }
+  kpiRow2: {
+    html += kpiRow("Costo materiales total", fin.materialsCost);
+    html += kpiRow("Costo subcontratos (suma)", subcontractsTotal());
+    html += kpiRow("HH suma por actividad", hhSum());
+    html += kpiRow("HH total (usado en el proyecto)", hhTotal());
+    var cf0 = cashflowByWeek();
+    var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
+    var egrT0 = cf0 ? cf0.egrAcum[cf0.egrAcum.length-1] : null;
+    html += kpiRow("Ingresos totales (hitos)", ingT0);
+    html += kpiRow("Egresos totales (hitos)", egrT0);
+    if (ingT0!==null || egrT0!==null) html += kpiRow("Diferencia final", (ingT0||0)-(egrT0||0));
+  }
+  html += '<tr><td style="border:none;"></td></tr>';
+
+  html += '<tr><td colspan="2" style="font-weight:bold;font-size:12pt;border:none;">Subcontratos</td></tr>';
+  html += '<tr>' + thCell("Nombre") + thCell("Monto") + '</tr>';
+  if (!fin.subcontracts.length){
+    html += '<tr><td colspan="2" style="color:#999999;">Sin subcontratos.</td></tr>';
+  } else {
+    fin.subcontracts.forEach(function(s){
+      html += '<tr><td>' + xlsEsc(s.name) + '</td><td>' + (s.amount===null?"":s.amount) + '</td></tr>';
+    });
+  }
+  html += '<tr><td style="border:none;"></td></tr>';
+
+  html += '<tr><td colspan="3" style="font-weight:bold;font-size:12pt;border:none;">HH por actividad</td></tr>';
+  html += '<tr>' + thCell("Módulo") + thCell("Actividad") + thCell("HH") + '</tr>';
+  var anyHH = false;
+  state.modules.forEach(function(m){
+    m.activities.forEach(function(a){
+      if (typeof a.hh === "number"){
+        anyHH = true;
+        html += '<tr><td>' + xlsEsc(m.name) + '</td><td>' + xlsEsc(a.name) + '</td><td>' + a.hh + '</td></tr>';
+      }
+    });
   });
-  var csv = "﻿" + lines.join("\\r\\n");
-  var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  if (!anyHH) html += '<tr><td colspan="3" style="color:#999999;">Sin HH cargadas por actividad.</td></tr>';
+  html += '<tr><td style="border:none;"></td></tr>';
+
+  html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Hitos de cobro y pago</td></tr>';
+  html += '<tr>' + ["Tipo","Descripción","Actividad asociada","Momento","Monto","Semana"].map(thCell).join("") + '</tr>';
+  if (!fin.milestones.length){
+    html += '<tr><td colspan="6" style="color:#999999;">Sin hitos.</td></tr>';
+  } else {
+    fin.milestones.forEach(function(ms){
+      var f = ms.actId ? findActivity(ms.actId) : null;
+      var wk = milestoneWeek(ms);
+      html += '<tr>';
+      html += '<td>' + (ms.type==="cobro"?"Cobro (ingreso)":"Pago (egreso)") + '</td>';
+      html += '<td>' + xlsEsc(ms.desc) + '</td>';
+      html += '<td>' + (f ? xlsEsc(f.mod.name + " › " + f.act.name) : "(sin actividad)") + '</td>';
+      html += '<td>' + (ms.actId ? (ms.moment==="end"?"Fin":"Inicio") : "") + '</td>';
+      html += '<td>' + (ms.amount===null?"":ms.amount) + '</td>';
+      html += '<td>' + (wk===null?"—":("Semana " + (wk+1))) + '</td>';
+      html += '</tr>';
+    });
+  }
+  html += '<tr><td style="border:none;"></td></tr>';
+
+  html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Flujo de caja acumulado por semana</td></tr>';
+  html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].map(thCell).join("") + '</tr>';
+  var cf = cashflowByWeek();
+  if (!cf){
+    html += '<tr><td colspan="6" style="color:#999999;">Sin hitos con monto y fecha.</td></tr>';
+  } else {
+    for (var i=0;i<state.weeks;i++){
+      html += '<tr><td>' + (i+1) + '</td><td>' + cf.ing[i] + '</td><td>' + cf.egr[i] + '</td><td>' + cf.ingAcum[i] + '</td><td>' + cf.egrAcum[i] + '</td><td>' + cf.diff[i] + '</td></tr>';
+    }
+  }
+  html += '</table>';
+  return html;
+}
+
+function buildDepsSheetHTML(){
+  var vio = computeViolations();
+  var html = '<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
+  html += '<tr><td colspan="5" style="font-size:14pt;font-weight:bold;border:none;">Dependencias</td></tr>';
+  html += '<tr><td style="border:none;"></td></tr>';
+  html += '<tr>' + ["Origen","Tipo","Delay (días)","Destino","Estado"].map(thCell).join("") + '</tr>';
+  if (!state.deps.length){
+    html += '<tr><td colspan="5" style="color:#999999;">Sin dependencias.</td></tr>';
+  } else {
+    state.deps.forEach(function(d){
+      var f = findActivity(d.from), t = findActivity(d.to);
+      if (!f || !t) return;
+      var bad = !!vio.violated[d.id];
+      var estado = bad ? ("Incumple: " + vio.violated[d.id]) : "Cumple";
+      html += '<tr' + (bad ? ' style="background:#fdf2f2;"' : '') + '>';
+      html += '<td>' + xlsEsc(f.mod.name + " › " + f.act.name) + '</td>';
+      html += '<td>' + xlsEsc(typeLabel(d.type)) + '</td>';
+      html += '<td>' + d.delay + '</td>';
+      html += '<td>' + xlsEsc(t.mod.name + " › " + t.act.name) + '</td>';
+      html += '<td' + (bad ? ' style="color:#a12c2c;font-weight:bold;"' : '') + '>' + xlsEsc(estado) + '</td>';
+      html += '</tr>';
+    });
+  }
+  html += '</table>';
+  return html;
+}
+
+function exportExcel(){
+  var sheets = [
+    { name: "Gantt", html: buildGanttSheetHTML() },
+    { name: "Financiero", html: buildFinanceSheetHTML() },
+    { name: "Dependencias", html: buildDepsSheetHTML() }
+  ];
+  var xmlSheets = sheets.map(function(s){
+    return '<x:ExcelWorksheet><x:Name>' + xlsEsc(s.name) + '</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>';
+  }).join("");
+  var doc = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">' +
+    '<head><meta charset="utf-8">' +
+    '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>' + xmlSheets + '</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
+    '</head><body>' + sheets.map(function(s){ return s.html; }).join("") + '</body></html>';
+  var blob = new Blob([doc], { type: "application/vnd.ms-excel" });
   var url = URL.createObjectURL(blob);
   var a = document.createElement("a");
   a.href = url;
-  a.download = "DESLOG_253795_Watts_Gantt.csv";
+  a.download = "DESLOG_253795_Watts_Gantt.xls";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -807,6 +1005,318 @@ function renderLegend(){
   });
 }
 
+// ==================== Financiero ====================
+var financeChart = null;
+
+function fmtNum(n){
+  if (n===null || typeof n === "undefined" || isNaN(n)) return "—";
+  try { return Math.round(n).toLocaleString("es-CL"); } catch(e){ return String(Math.round(n)); }
+}
+
+function hhSum(){
+  var sum = 0, any = false;
+  state.modules.forEach(function(m){
+    m.activities.forEach(function(a){
+      if (typeof a.hh === "number"){ sum += a.hh; any = true; }
+    });
+  });
+  return any ? sum : null;
+}
+function hhTotal(){
+  var man = state.finance.hhManualTotal;
+  if (typeof man === "number") return man;
+  return hhSum();
+}
+function subcontractsTotal(){
+  var sum = 0, any = false;
+  state.finance.subcontracts.forEach(function(s){
+    if (typeof s.amount === "number"){ sum += s.amount; any = true; }
+  });
+  return any ? sum : null;
+}
+function milestoneWeek(ms){
+  if (ms.actId){
+    var f = findActivity(ms.actId);
+    if (!f || f.act.start === null) return null;
+    return ms.moment === "end" ? f.act.end : f.act.start;
+  }
+  return (typeof ms.manualWeek === "number") ? ms.manualWeek : null;
+}
+function cashflowByWeek(){
+  var n = state.weeks;
+  var ing = new Array(n), egr = new Array(n);
+  for (var z=0; z<n; z++){ ing[z]=0; egr[z]=0; }
+  var any = false;
+  state.finance.milestones.forEach(function(ms){
+    if (typeof ms.amount !== "number") return;
+    var wk = milestoneWeek(ms);
+    if (wk === null || wk < 0 || wk >= n) return;
+    any = true;
+    if (ms.type === "cobro") ing[wk] += ms.amount; else egr[wk] += ms.amount;
+  });
+  if (!any) return null;
+  var ingAcum = [], egrAcum = [], diff = [], ai=0, ae=0;
+  for (var i=0;i<n;i++){ ai+=ing[i]; ae+=egr[i]; ingAcum.push(ai); egrAcum.push(ae); diff.push(ai-ae); }
+  return { ing:ing, egr:egr, ingAcum:ingAcum, egrAcum:egrAcum, diff:diff };
+}
+
+function fillActivitySelectWithNone(sel, selectedId){
+  sel.innerHTML = "";
+  var noneOpt = el("option"); noneOpt.value = ""; noneOpt.textContent = "(sin actividad — semana manual)";
+  if (!selectedId) noneOpt.selected = true;
+  sel.appendChild(noneOpt);
+  state.modules.forEach(function(m){
+    m.activities.forEach(function(a){
+      var opt = el("option"); opt.value = a.id; opt.textContent = m.name + " › " + a.name;
+      if (a.id === selectedId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+function statSpan(label, value){
+  var s = el("span");
+  s.appendChild(document.createTextNode(label + ": "));
+  s.appendChild(el("b",null,{text: "$ " + fmtNum(value)}));
+  return s;
+}
+
+function mountCashflowChart(cfData){
+  var canvas = document.getElementById("cashflowCanvas");
+  if (!canvas) return;
+  if (typeof Chart === "undefined"){
+    var wrap = canvas.parentNode;
+    if (wrap) wrap.replaceChild(el("div","empty",{text:"No se pudo cargar la librería de gráficos (sin conexión). Los totales de arriba siguen siendo correctos."}), canvas);
+    return;
+  }
+  var labels = [];
+  for (var i=0;i<state.weeks;i++) labels.push(String(i+1));
+  if (financeChart){ financeChart.destroy(); financeChart = null; }
+  financeChart = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [
+        { label:"Ingresos acumulados", data: cfData.ingAcum, borderColor:"#2e7d43", backgroundColor:"rgba(46,125,67,0.08)", tension:0.15, pointRadius:0, borderWidth:2 },
+        { label:"Egresos acumulados", data: cfData.egrAcum, borderColor:"#c0392b", backgroundColor:"rgba(192,57,43,0.08)", tension:0.15, pointRadius:0, borderWidth:2 },
+        { label:"Diferencia", data: cfData.diff, borderColor:"#2b6cb0", backgroundColor:"rgba(43,108,176,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[4,3] }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { title: { display:true, text:"Semana", font:{size:10} }, ticks:{font:{size:9}} },
+        y: { ticks: { callback: function(v){ return fmtNum(v); }, font:{size:9} } }
+      },
+      plugins: { legend: { position:"bottom", labels:{ boxWidth:12, font:{size:10} } } }
+    }
+  });
+}
+
+function renderFinance(){
+  var body = document.getElementById("financeBody");
+  var fin = state.finance;
+  document.getElementById("financeChevron").textContent = fin.collapsed ? "▸" : "▾";
+  if (fin.collapsed){ body.style.display = "none"; return; }
+  if (financeChart){ financeChart.destroy(); financeChart = null; }
+  body.style.display = "block";
+  body.innerHTML = "";
+
+  // --- KPIs ---
+  var kpiSection = el("div","finsection");
+  kpiSection.appendChild(el("h4",null,{text:"Resumen"}));
+  var kpiRow = el("div","kpirow");
+
+  var matCard = el("div","kpicard");
+  matCard.appendChild(el("label",null,{text:"Costo materiales total"}));
+  var matInp = el("input"); matInp.type="number"; matInp.placeholder="—"; matInp.value = fin.materialsCost===null?"":fin.materialsCost;
+  matInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.materialsCost = v===""?null:parseFloat(v); save(); renderFinance(); });
+  matCard.appendChild(matInp);
+  kpiRow.appendChild(matCard);
+
+  var subTotal = subcontractsTotal();
+  var subCard = el("div","kpicard computed");
+  subCard.appendChild(el("label",null,{text:"Costo subcontratos (suma)"}));
+  subCard.appendChild(subTotal===null ? el("div","kpivalempty",{text:"— sin subcontratos"}) : el("div","kpival",{text:"$ "+fmtNum(subTotal)}));
+  kpiRow.appendChild(subCard);
+
+  var computedHH = hhSum();
+  var hhCard = el("div","kpicard");
+  hhCard.appendChild(el("label",null,{text:"HH total del proyecto"}));
+  var hhInp = el("input"); hhInp.type="number";
+  hhInp.placeholder = computedHH===null ? "—" : String(computedHH);
+  hhInp.value = fin.hhManualTotal===null?"":fin.hhManualTotal;
+  hhInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.hhManualTotal = v===""?null:parseFloat(v); save(); renderFinance(); });
+  hhCard.appendChild(hhInp);
+  var hhHintTxt = computedHH===null ? "Sin HH por actividad cargadas." : ("Suma por actividad: " + computedHH + " hh.");
+  hhCard.appendChild(el("div","kpihint",{text: hhHintTxt + " Deja vacío para usar la suma."}));
+  kpiRow.appendChild(hhCard);
+
+  var cfData = cashflowByWeek();
+  var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
+  var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
+
+  var ingCard = el("div","kpicard computed");
+  ingCard.appendChild(el("label",null,{text:"Ingresos totales (hitos)"}));
+  ingCard.appendChild(ingTotal===null ? el("div","kpivalempty",{text:"— sin hitos de cobro"}) : el("div","kpival",{text:"$ "+fmtNum(ingTotal)}));
+  kpiRow.appendChild(ingCard);
+
+  var egrCard = el("div","kpicard computed");
+  egrCard.appendChild(el("label",null,{text:"Egresos totales (hitos)"}));
+  egrCard.appendChild(egrTotal===null ? el("div","kpivalempty",{text:"— sin hitos de pago"}) : el("div","kpival",{text:"$ "+fmtNum(egrTotal)}));
+  kpiRow.appendChild(egrCard);
+
+  kpiSection.appendChild(kpiRow);
+  kpiSection.appendChild(el("div","kpihint",{text:"El costo de materiales y de subcontratos son montos de referencia; para verlos reflejados en el flujo de caja de abajo, crea un hito de pago con esa fecha."}));
+  body.appendChild(kpiSection);
+
+  // --- Subcontratos ---
+  var subSection = el("div","finsection");
+  subSection.appendChild(el("h4",null,{text:"Subcontratos"}));
+  if (!fin.subcontracts.length){
+    subSection.appendChild(el("div","empty",{text:"Sin subcontratos agregados."}));
+  } else {
+    var subTable = el("table","fintable");
+    var subThead = el("thead"); var subHtr = el("tr");
+    subHtr.appendChild(el("th",null,{text:"Nombre"}));
+    subHtr.appendChild(el("th",null,{text:"Monto"}));
+    subHtr.appendChild(el("th",null,{text:""}));
+    subThead.appendChild(subHtr); subTable.appendChild(subThead);
+    var subTbody = el("tbody");
+    fin.subcontracts.forEach(function(s){
+      var tr = el("tr");
+      var tdName = el("td"); var nameInp = el("input"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
+      nameInp.addEventListener("change", function(ev){ s.name=ev.target.value; save(); });
+      tdName.appendChild(nameInp); tr.appendChild(tdName);
+      var tdAmt = el("td"); var amtInp = el("input"); amtInp.type="number"; amtInp.value=s.amount===null?"":s.amount; amtInp.placeholder="0";
+      amtInp.addEventListener("change", function(ev){ var v=ev.target.value; s.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
+      tdAmt.appendChild(amtInp); tr.appendChild(tdAmt);
+      var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
+      delB.addEventListener("click", function(ss){ return function(){ fin.subcontracts = fin.subcontracts.filter(function(x){return x!==ss;}); save(); renderFinance(); }; }(s));
+      tdDel.appendChild(delB); tr.appendChild(tdDel);
+      subTbody.appendChild(tr);
+    });
+    subTable.appendChild(subTbody);
+    subSection.appendChild(subTable);
+  }
+  var addSubBtn = el("button","finaddbtn",{text:"+ Agregar subcontrato"});
+  addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({name:"", amount:null}); save(); renderFinance(); });
+  subSection.appendChild(addSubBtn);
+  body.appendChild(subSection);
+
+  // --- HH por actividad ---
+  var hhSection = el("div","finsection");
+  hhSection.appendChild(el("h4",null,{text:"HH por actividad (opcional)"}));
+  var allActs = allActivitiesFlat();
+  if (!allActs.length){
+    hhSection.appendChild(el("div","empty",{text:"No hay actividades todavía."}));
+  } else {
+    var hhTable = el("table","fintable");
+    var hhThead = el("thead"); var hhHtr = el("tr");
+    hhHtr.appendChild(el("th",null,{text:"Módulo › Actividad"}));
+    hhHtr.appendChild(el("th",null,{text:"HH"}));
+    hhThead.appendChild(hhHtr); hhTable.appendChild(hhThead);
+    var hhTbody = el("tbody");
+    allActs.forEach(function(entry){
+      var tr = el("tr");
+      tr.appendChild(el("td",null,{text: entry.mod.name + " › " + entry.act.name}));
+      var tdHH = el("td"); var hhi = el("input"); hhi.type="number"; hhi.value = entry.act.hh===null?"":entry.act.hh; hhi.placeholder="—";
+      hhi.addEventListener("change", function(aa){ return function(ev){ var v=ev.target.value; aa.hh = v===""?null:parseFloat(v); save(); renderFinance(); }; }(entry.act));
+      tdHH.appendChild(hhi); tr.appendChild(tdHH);
+      hhTbody.appendChild(tr);
+    });
+    hhTable.appendChild(hhTbody);
+    hhSection.appendChild(hhTable);
+  }
+  body.appendChild(hhSection);
+
+  // --- Hitos ---
+  var msSection = el("div","finsection");
+  msSection.appendChild(el("h4",null,{text:"Hitos de cobro y pago"}));
+  if (!fin.milestones.length){
+    msSection.appendChild(el("div","empty",{text:'Sin hitos todavía. Ej: "Facturar 30% al cliente antes del envío" o "Pagar 50% de anticipo al subcontratista X antes de iniciar el diseño".'}));
+  } else {
+    var msTable = el("table","fintable");
+    var msThead = el("thead"); var msHtr = el("tr");
+    ["Tipo","Descripción","Actividad asociada","Momento","Monto","Semana",""].forEach(function(h){ msHtr.appendChild(el("th",null,{text:h})); });
+    msThead.appendChild(msHtr); msTable.appendChild(msThead);
+    var msTbody = el("tbody");
+    fin.milestones.forEach(function(ms){
+      var tr = el("tr");
+
+      var tdType = el("td"); var typeSel = el("select");
+      [["cobro","Cobro (ingreso)"],["pago","Pago (egreso)"]].forEach(function(o){ var op=el("option"); op.value=o[0]; op.textContent=o[1]; if(ms.type===o[0]) op.selected=true; typeSel.appendChild(op); });
+      typeSel.addEventListener("change", function(ev){ ms.type=ev.target.value; save(); renderFinance(); });
+      tdType.appendChild(typeSel); tr.appendChild(tdType);
+
+      var tdDesc = el("td"); var descInp = el("input"); descInp.type="text"; descInp.value=ms.desc; descInp.placeholder="Ej: Facturar 30% previo a envío";
+      descInp.addEventListener("change", function(ev){ ms.desc=ev.target.value; save(); });
+      tdDesc.appendChild(descInp); tr.appendChild(tdDesc);
+
+      var tdAct = el("td"); var actSel = el("select"); fillActivitySelectWithNone(actSel, ms.actId);
+      actSel.addEventListener("change", function(ev){ ms.actId = ev.target.value || null; save(); renderFinance(); });
+      tdAct.appendChild(actSel); tr.appendChild(tdAct);
+
+      var tdMoment = el("td"); var momSel = el("select"); momSel.disabled = !ms.actId;
+      [["start","Inicio"],["end","Fin"]].forEach(function(o){ var op=el("option"); op.value=o[0]; op.textContent=o[1]; if(ms.moment===o[0]) op.selected=true; momSel.appendChild(op); });
+      momSel.addEventListener("change", function(ev){ ms.moment=ev.target.value; save(); renderFinance(); });
+      tdMoment.appendChild(momSel); tr.appendChild(tdMoment);
+
+      var tdAmt = el("td"); var amtInp = el("input"); amtInp.type="number"; amtInp.value=ms.amount===null?"":ms.amount; amtInp.placeholder="0";
+      amtInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
+      tdAmt.appendChild(amtInp); tr.appendChild(tdAmt);
+
+      var tdWeek = el("td");
+      if (ms.actId){
+        var wk = milestoneWeek(ms);
+        tdWeek.appendChild(el("span","weektag",{text: wk===null ? "— (sin fechas)" : ("Semana " + (wk+1))}));
+      } else {
+        var wkInp = el("input"); wkInp.type="number"; wkInp.min=1; wkInp.max=state.weeks;
+        wkInp.value = (typeof ms.manualWeek === "number") ? (ms.manualWeek+1) : "";
+        wkInp.placeholder="Semana";
+        wkInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.manualWeek = v===""?null:(parseInt(v,10)-1); save(); renderFinance(); });
+        tdWeek.appendChild(wkInp);
+      }
+      tr.appendChild(tdWeek);
+
+      var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
+      delB.addEventListener("click", function(mm){ return function(){ fin.milestones = fin.milestones.filter(function(x){return x!==mm;}); save(); renderFinance(); }; }(ms));
+      tdDel.appendChild(delB); tr.appendChild(tdDel);
+
+      msTbody.appendChild(tr);
+    });
+    msTable.appendChild(msTbody);
+    msSection.appendChild(msTable);
+  }
+  var addMsBtn = el("button","finaddbtn",{text:"+ Agregar hito"});
+  addMsBtn.addEventListener("click", function(){
+    fin.milestones.push({ id: uid("ms"), type:"cobro", desc:"", actId:null, moment:"start", amount:null, manualWeek:null });
+    save(); renderFinance();
+  });
+  msSection.appendChild(addMsBtn);
+  body.appendChild(msSection);
+
+  // --- Flujo de caja ---
+  var chartSection = el("div","finsection");
+  chartSection.appendChild(el("h4",null,{text:"Flujo de caja acumulado"}));
+  if (!cfData){
+    chartSection.appendChild(el("div","empty",{text:"Agrega hitos con monto y una actividad (o semana manual) para ver el flujo de caja."}));
+  } else {
+    var wrap = el("div","chartwrap");
+    var canvas = el("canvas"); canvas.id = "cashflowCanvas";
+    wrap.appendChild(canvas);
+    chartSection.appendChild(wrap);
+    var summary = el("div","fincashsummary");
+    summary.appendChild(statSpan("Ingresos totales", ingTotal));
+    summary.appendChild(statSpan("Egresos totales", egrTotal));
+    summary.appendChild(statSpan("Diferencia final", (ingTotal||0)-(egrTotal||0)));
+    chartSection.appendChild(summary);
+  }
+  body.appendChild(chartSection);
+
+  if (cfData) mountCashflowChart(cfData);
+}
+
 document.getElementById("weeksInput").addEventListener("change", function(ev){
   var v = parseInt(ev.target.value, 10);
   if (isNaN(v) || v < 8) v = 8;
@@ -824,7 +1334,7 @@ document.getElementById("weeksInput").value = state.weeks;
 
 document.getElementById("addModuleBtn").addEventListener("click", function(){
   state.modules.push({ id: uid("mod"), name: "Nuevo módulo", color: nextColor(), collapsed:false, activities: [
-    { id: uid("act"), name: "Nueva actividad", start:null, end:null }
+    { id: uid("act"), name: "Nueva actividad", start:null, end:null, hh:null }
   ]});
   save(); render();
 });
@@ -845,7 +1355,7 @@ document.getElementById("loadFileInput").addEventListener("change", function(ev)
   if (f) loadFromFile(f);
   ev.target.value = "";
 });
-document.getElementById("exportBtn").addEventListener("click", exportCSV);
+document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("depFilterText").addEventListener("input", renderDepsOnly);
 document.getElementById("depFilterEstado").addEventListener("change", renderDepsOnly);
 document.querySelectorAll("#depsTable th[data-key]").forEach(function(th){
@@ -864,6 +1374,11 @@ document.getElementById("addDepBtn").addEventListener("click", function(){
   if (!from || !to || from === to) return;
   state.deps.push({ id: uid("dep"), from: from, to: to, type: type, delay: delay });
   save(); render();
+});
+document.getElementById("financeHeader").addEventListener("click", function(){
+  state.finance.collapsed = !state.finance.collapsed;
+  save();
+  renderFinance();
 });
 document.getElementById("resetBtn").addEventListener("click", function(){
   if (!confirmish(this, "restaurar el borrador inicial (se perderán tus cambios)")) return;
