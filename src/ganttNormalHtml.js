@@ -47,6 +47,11 @@ button.danger:hover{background:#fbecec;}
 .week.violated{outline:2px solid #c0392b;outline-offset:-2px;}
 .moduleband .week{background:var(--bandc,#fff);cursor:default;}
 .weeknum{display:flex;align-items:center;justify-content:center;font-size:10px;color:#9aa1ac;border-right:1px solid #f0f0f1;}
+.row.hitosrow{height:14px;position:sticky;top:32px;background:#fafbfc;z-index:3;border-bottom:1px solid #eee;}
+.hitoscell{display:flex;align-items:center;justify-content:center;gap:1px;border-right:1px solid #f0f0f1;font-size:8px;line-height:1;cursor:default;}
+.hitomark{line-height:1;}
+.hitomark.hitocobro{color:#2e7d43;}
+.hitomark.hitopago{color:var(--pr-orange);}
 .handle{position:absolute;top:2px;bottom:2px;width:6px;cursor:ew-resize;background:rgba(0,0,0,0.18);border-radius:2px;}
 .handle.right{right:0;}
 .handle.left{left:0;}
@@ -525,6 +530,29 @@ function render(){
   hrow.appendChild(el("div","label",{text:""}));
   for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum",{text:String(w+1)}));
   grid.appendChild(hrow);
+
+  var allMilestones = collectAllMilestones();
+  if (allMilestones.length){
+    var byWeek = {};
+    allMilestones.forEach(function(ms){ (byWeek[ms.week] = byWeek[ms.week]||[]).push(ms); });
+    var hitosRow = el("div","row hitosrow");
+    hitosRow.style.display = "grid";
+    hitosRow.style.gridTemplateColumns = colTemplate();
+    hitosRow.appendChild(el("div","label",{text:""}));
+    for (var wH=0; wH<state.weeks; wH++){
+      var hcell = el("div","hitoscell");
+      var atWeek = byWeek[wH];
+      if (atWeek && atWeek.length){
+        hcell.title = atWeek.map(function(m){
+          return (m.type==="cobro"?"↑ Cobro":"↓ Pago") + " — " + m.desc + (m.amount!==null ? (" ($ " + fmtNum(m.amount) + ")") : " (sin % o total definido)") + " [" + m.source + "]";
+        }).join("\\n");
+        if (atWeek.some(function(m){return m.type==="cobro";})) hcell.appendChild(el("span","hitomark hitocobro",{text:"▲"}));
+        if (atWeek.some(function(m){return m.type==="pago";})) hcell.appendChild(el("span","hitomark hitopago",{text:"▼"}));
+      }
+      hitosRow.appendChild(hcell);
+    }
+    grid.appendChild(hitosRow);
+  }
 
   state.modules.forEach(function(m){
     var span = moduleSpan(m);
@@ -1142,6 +1170,25 @@ function milestoneAmount(total, ms){
   if (typeof ms.legacyAmount === "number") return ms.legacyAmount;
   return null;
 }
+// Every milestone (cliente/materiales/subcontratos) with a resolved week, for the
+// calendar markers row and the cashflow chart markers. Milestones without a resolved
+// week (no asociación ni semana manual) are excluded — nothing to place on a timeline.
+function collectAllMilestones(){
+  var out = [];
+  function push(list, total, type, sourceLabel){
+    list.forEach(function(ms){
+      var wk = milestoneWeek(ms);
+      if (wk === null || wk < 0 || wk >= state.weeks) return;
+      out.push({ desc: ms.desc || "(sin descripción)", type: type, week: wk, amount: milestoneAmount(total, ms), source: sourceLabel });
+    });
+  }
+  push(state.finance.clientContract.milestones, state.finance.clientContract.total, "cobro", "Cliente");
+  push(state.finance.materials.milestones, state.finance.materials.total, "pago", "Materiales");
+  state.finance.subcontracts.forEach(function(s){
+    push(s.milestones, s.amount, "pago", s.name || "Subcontrato");
+  });
+  return out;
+}
 function milestoneWeek(ms){
   if (ms.assocKind === "activity" && ms.assocId){
     var f = findActivity(ms.assocId);
@@ -1316,6 +1363,28 @@ function mountCashflowChart(cfData){
     datasets.push({ label:"Costo HH acumulado", data: cfData.hhAcum, borderColor:"#DE7C00", backgroundColor:"rgba(222,124,0,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[2,2] });
     datasets.push({ label:"Diferencia con HH", data: cfData.diffWithHH, borderColor:"#7F77DD", backgroundColor:"rgba(127,119,221,0.08)", tension:0.15, pointRadius:0, borderWidth:2, borderDash:[6,3] });
   }
+
+  // Milestone markers: small points laid exactly on the ingresos/egresos lines at the
+  // week each hito falls on — no extra lines added, just labeled dots so the (necessarily
+  // ever-rising) accumulated lines have concrete "why did it move here" anchors.
+  var allMs = collectAllMilestones();
+  var cobroLabels = {}, pagoLabels = {};
+  var cobroPoints = [], pagoPoints = [], cobroRadii = [], pagoRadii = [];
+  for (var wm=0; wm<state.weeks; wm++){ cobroPoints.push(null); pagoPoints.push(null); cobroRadii.push(0); pagoRadii.push(0); }
+  allMs.forEach(function(ms){
+    if (ms.type === "cobro"){
+      cobroPoints[ms.week] = cfData.ingAcum[ms.week]; cobroRadii[ms.week] = 6;
+      (cobroLabels[ms.week] = cobroLabels[ms.week]||[]).push(ms);
+    } else {
+      pagoPoints[ms.week] = cfData.egrAcum[ms.week]; pagoRadii[ms.week] = 6;
+      (pagoLabels[ms.week] = pagoLabels[ms.week]||[]).push(ms);
+    }
+  });
+  if (allMs.length){
+    datasets.push({ label:"Hitos de cobro", data: cobroPoints, showLine:false, pointStyle:"triangle", pointRadius: cobroRadii, pointHoverRadius: 7, pointBackgroundColor:"#2e7d43", pointBorderColor:"#fff", pointBorderWidth:1 });
+    datasets.push({ label:"Hitos de pago", data: pagoPoints, showLine:false, pointStyle:"rectRot", pointRadius: pagoRadii, pointHoverRadius: 7, pointBackgroundColor:"#DE7C00", pointBorderColor:"#fff", pointBorderWidth:1 });
+  }
+
   financeChart = new Chart(canvas.getContext("2d"), {
     type: "line",
     data: { labels: labels, datasets: datasets },
@@ -1330,7 +1399,18 @@ function mountCashflowChart(cfData){
         legend: { position:"bottom", labels:{ boxWidth:12, font:{size:10} } },
         tooltip: {
           mode:"index", intersect:false,
-          callbacks: { label: function(ctx){ return ctx.dataset.label + ": $ " + fmtNum(ctx.parsed.y); } }
+          callbacks: {
+            label: function(ctx){
+              if (ctx.dataset.label === "Hitos de cobro" || ctx.dataset.label === "Hitos de pago"){
+                var map = ctx.dataset.label === "Hitos de cobro" ? cobroLabels : pagoLabels;
+                var atW = map[ctx.dataIndex];
+                if (!atW || !atW.length) return null;
+                var arrow = ctx.dataset.label === "Hitos de cobro" ? "↑ " : "↓ ";
+                return atW.map(function(m){ return arrow + m.desc + (m.amount!==null ? (" — $ "+fmtNum(m.amount)) : "") + " (" + m.source + ")"; });
+              }
+              return ctx.dataset.label + ": $ " + fmtNum(ctx.parsed.y);
+            }
+          }
         }
       }
     }
