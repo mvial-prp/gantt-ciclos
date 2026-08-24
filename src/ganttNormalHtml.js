@@ -85,8 +85,8 @@ button.danger:hover{background:#fbecec;}
 .legend span{display:inline-flex;align-items:center;gap:4px;}
 .legenddot{width:8px;height:8px;border-radius:2px;}
 .empty{color:#9aa1ac;font-size:12px;padding:6px 8px;}
-.financebox{margin-top:16px;border:1px solid #e5e5e8;border-radius:8px;overflow:hidden;}
-.financeheader{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#f7f7f8;cursor:pointer;user-select:none;}
+.financebox{margin-top:16px;border:1px solid #e5e5e8;border-radius:8px;}
+.financeheader{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#f7f7f8;cursor:pointer;user-select:none;border-radius:8px 8px 0 0;}
 .financeheader h3{font-size:12px;font-weight:600;color:#1f2430;text-transform:uppercase;letter-spacing:.03em;}
 .finhint{font-size:11px;color:#9aa1ac;font-weight:400;text-transform:none;letter-spacing:0;}
 #financeBody{padding:14px 16px;}
@@ -114,6 +114,23 @@ button.danger:hover{background:#fbecec;}
 .finaddbtn{margin-top:2px;}
 .fincashsummary{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#4b5563;margin-top:8px;}
 .fincashsummary b{color:#1f2430;}
+.fintotalrow{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.fintotallabel{font-size:11.5px;color:#4b5563;font-weight:600;white-space:nowrap;}
+.fintotalrow input[type=number]{width:150px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
+.fintotalwrap{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#4b5563;white-space:nowrap;}
+.fintotalwrap input[type=number]{width:120px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
+.subcard{border:1px solid #e5e5e8;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fafbfc;}
+.subcardhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px;}
+.subcardhead input.subname{font-family:inherit;font-size:12.5px;font-weight:600;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;flex:1 1 200px;min-width:160px;}
+.assoccombo{position:relative;min-width:180px;display:flex;align-items:center;gap:2px;}
+.assoccombo-input{font-family:inherit;font-size:11.5px;padding:3px 5px;border:1px solid #d1d5db;border-radius:4px;background:#fff;width:100%;}
+.assoccombo-clear{flex:0 0 auto;width:18px;height:18px;padding:0;font-size:12px;line-height:1;border:none;background:transparent;color:#9aa1ac;cursor:pointer;border-radius:4px;}
+.assoccombo-clear:hover{background:#eceef1;color:#a12c2c;}
+.assoccombo-list{position:absolute;top:100%;left:0;right:0;z-index:20;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.14);max-height:200px;overflow-y:auto;margin-top:2px;}
+.assoccombo-opt{padding:5px 8px;font-size:11.5px;cursor:pointer;white-space:nowrap;}
+.assoccombo-opt:hover{background:#eaf2fb;}
+.assoccombo-opt-module{font-weight:600;background:#f7f7f8;}
+.assoccombo-empty{padding:6px 8px;font-size:11.5px;color:#9aa1ac;}
 </style>
 </head>
 <body>
@@ -266,10 +283,10 @@ function defaultState(){
 
 function defaultFinance(){
   return {
-    materialsCost: null,
+    clientContract: { total: null, milestones: [] },
+    materials: { total: null, milestones: [] },
     hhManualTotal: null,
     subcontracts: [],
-    milestones: [],
     collapsed: true
   };
 }
@@ -278,14 +295,21 @@ var STORAGE_KEY = "deslog253795-watts-gantt-v2";
 var OLD_KEY = "deslog253795-watts-gantt-v1";
 
 function migrate(st){
+  if (!Array.isArray(st.modules)) st.modules = [];
   st.modules.forEach(function(m){
+    if (typeof m.id === "undefined" || m.id === null) m.id = uid("mod");
+    if (typeof m.name === "undefined" || m.name === null) m.name = "Módulo sin nombre";
+    if (typeof m.color === "undefined" || m.color === null) m.color = nextColor();
     if (typeof m.collapsed === "undefined") m.collapsed = false;
+    if (!Array.isArray(m.activities)) m.activities = [];
     m.activities.forEach(function(a){
       if (a.cells){
         if (a.cells.length){ a.start = Math.min.apply(null,a.cells); a.end = Math.max.apply(null,a.cells); }
         else { a.start = null; a.end = null; }
         delete a.cells;
       }
+      if (typeof a.id === "undefined" || a.id === null) a.id = uid("act");
+      if (typeof a.name === "undefined" || a.name === null) a.name = "Actividad sin nombre";
       if (typeof a.start === "undefined") a.start = null;
       if (typeof a.end === "undefined") a.end = null;
       if (typeof a.hh === "undefined") a.hh = null;
@@ -296,24 +320,79 @@ function migrate(st){
     if (typeof d.delay !== "number") d.delay = 0;
   });
   if (!st.deps) st.deps = [];
+
+  // semanas: si falta o es inválida, o si hay actividades que se salen del rango, se ajusta sola
+  var maxEnd = -1;
+  st.modules.forEach(function(m){ m.activities.forEach(function(a){ if (a.end !== null && a.end > maxEnd) maxEnd = a.end; }); });
+  if (typeof st.weeks !== "number" || isNaN(st.weeks) || st.weeks < 1){
+    st.weeks = Math.max(8, maxEnd + 1, 40);
+  } else if (maxEnd >= st.weeks){
+    st.weeks = maxEnd + 1;
+  }
+  if (st.weeks > 80) st.weeks = 80;
+  if (st.weeks < 8) st.weeks = 8;
+
   if (!st.finance) st.finance = defaultFinance();
   var fin = st.finance;
-  if (typeof fin.materialsCost === "undefined") fin.materialsCost = null;
+
+  // legacy: materialsCost was a flat number -> now materials.total
+  if (typeof fin.materialsCost !== "undefined"){
+    if (!fin.materials) fin.materials = { total: fin.materialsCost, milestones: [] };
+    delete fin.materialsCost;
+  }
+  if (!fin.materials) fin.materials = { total: null, milestones: [] };
+  if (typeof fin.materials.total === "undefined") fin.materials.total = null;
+  if (!Array.isArray(fin.materials.milestones)) fin.materials.milestones = [];
+
+  if (!fin.clientContract) fin.clientContract = { total: null, milestones: [] };
+  if (typeof fin.clientContract.total === "undefined") fin.clientContract.total = null;
+  if (!Array.isArray(fin.clientContract.milestones)) fin.clientContract.milestones = [];
+
   if (typeof fin.hhManualTotal === "undefined") fin.hhManualTotal = null;
   if (!Array.isArray(fin.subcontracts)) fin.subcontracts = [];
-  if (!Array.isArray(fin.milestones)) fin.milestones = [];
   if (typeof fin.collapsed === "undefined") fin.collapsed = true;
+
+  function migrateMilestone(ms){
+    if (typeof ms.id === "undefined") ms.id = uid("ms");
+    if (typeof ms.desc === "undefined") ms.desc = "";
+    if (typeof ms.pct !== "number") ms.pct = null;
+    if (typeof ms.assocKind === "undefined") ms.assocKind = null;
+    if (typeof ms.assocId === "undefined") ms.assocId = null;
+    if (!ms.moment) ms.moment = "start";
+    if (typeof ms.manualWeek !== "number") ms.manualWeek = null;
+    return ms;
+  }
+
   fin.subcontracts.forEach(function(s){
+    if (typeof s.id === "undefined") s.id = uid("sc");
     if (typeof s.name === "undefined") s.name = "";
     if (typeof s.amount !== "number") s.amount = null;
+    if (!Array.isArray(s.milestones)) s.milestones = [];
+    s.milestones.forEach(migrateMilestone);
   });
-  fin.milestones.forEach(function(ms){
-    if (!ms.type) ms.type = "cobro";
-    if (typeof ms.desc === "undefined") ms.desc = "";
-    if (typeof ms.actId === "undefined") ms.actId = null;
-    if (!ms.moment) ms.moment = "start";
-    if (typeof ms.amount !== "number") ms.amount = null;
-  });
+
+  // legacy: flat finance.milestones[] (type cobro/pago, actId, amount) -> grouped structure with pct
+  if (Array.isArray(fin.milestones)){
+    fin.milestones.forEach(function(old){
+      var nm = migrateMilestone({
+        id: old.id,
+        desc: old.desc,
+        pct: null,
+        assocKind: old.actId ? "activity" : null,
+        assocId: old.actId || null,
+        moment: old.moment,
+        manualWeek: old.manualWeek
+      });
+      if (typeof old.amount === "number") nm.legacyAmount = old.amount;
+      if (old.type === "cobro") fin.clientContract.milestones.push(nm);
+      else fin.materials.milestones.push(nm);
+    });
+    delete fin.milestones;
+  }
+
+  fin.clientContract.milestones.forEach(migrateMilestone);
+  fin.materials.milestones.forEach(migrateMilestone);
+
   return st;
 }
 
@@ -668,6 +747,30 @@ function buildGanttSheetHTML(){
   return html;
 }
 
+function milestonesBlockHTML(title, total, milestones){
+  var out = '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">' + xlsEsc(title) + (typeof total==="number" ? (" — total: " + total) : " — (sin total definido)") + '</td></tr>';
+  out += '<tr>' + ["Descripción","%","Monto","Asociado a","Momento","Semana"].map(thCell).join("") + '</tr>';
+  if (!milestones.length){
+    out += '<tr><td colspan="6" style="color:#999999;">Sin hitos.</td></tr>';
+  } else {
+    milestones.forEach(function(ms){
+      var amt = milestoneAmount(total, ms);
+      var wk = milestoneWeek(ms);
+      var assocTxt = assocLabel(ms.assocKind, ms.assocId) || "(sin asociar)";
+      out += '<tr>';
+      out += '<td>' + xlsEsc(ms.desc) + '</td>';
+      out += '<td>' + (ms.pct===null?"":ms.pct+"%") + '</td>';
+      out += '<td>' + (amt===null?"":amt) + '</td>';
+      out += '<td>' + xlsEsc(assocTxt) + '</td>';
+      out += '<td>' + (ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "") + '</td>';
+      out += '<td>' + (wk===null?"—":("Semana " + (wk+1))) + '</td>';
+      out += '</tr>';
+    });
+  }
+  out += '<tr><td style="border:none;"></td></tr>';
+  return out;
+}
+
 function buildFinanceSheetHTML(){
   var fin = state.finance;
   var html = '<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
@@ -677,30 +780,30 @@ function buildFinanceSheetHTML(){
   function kpiRow(label, value){
     return '<tr><td style="font-weight:bold;background:#f0f1f3;">' + xlsEsc(label) + '</td><td>' + (value===null||typeof value==="undefined"?"":value) + '</td><td colspan="4" style="border:none;"></td></tr>';
   }
-  kpiRow2: {
-    html += kpiRow("Costo materiales total", fin.materialsCost);
-    html += kpiRow("Costo subcontratos (suma)", subcontractsTotal());
-    html += kpiRow("HH suma por actividad", hhSum());
-    html += kpiRow("HH total (usado en el proyecto)", hhTotal());
-    var cf0 = cashflowByWeek();
-    var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
-    var egrT0 = cf0 ? cf0.egrAcum[cf0.egrAcum.length-1] : null;
-    html += kpiRow("Ingresos totales (hitos)", ingT0);
-    html += kpiRow("Egresos totales (hitos)", egrT0);
-    if (ingT0!==null || egrT0!==null) html += kpiRow("Diferencia final", (ingT0||0)-(egrT0||0));
-  }
+  html += kpiRow("Total contrato cliente", fin.clientContract.total);
+  html += kpiRow("Costo materiales total", fin.materials.total);
+  html += kpiRow("Costo subcontratos (suma)", subcontractsTotal());
+  html += kpiRow("HH suma por actividad", hhSum());
+  html += kpiRow("HH total (usado en el proyecto)", hhTotal());
+  var cf0 = cashflowByWeek();
+  var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
+  var egrT0 = cf0 ? cf0.egrAcum[cf0.egrAcum.length-1] : null;
+  html += kpiRow("Ingresos totales (hitos)", ingT0);
+  html += kpiRow("Egresos totales (hitos)", egrT0);
+  if (ingT0!==null || egrT0!==null) html += kpiRow("Diferencia final", (ingT0||0)-(egrT0||0));
   html += '<tr><td style="border:none;"></td></tr>';
 
-  html += '<tr><td colspan="2" style="font-weight:bold;font-size:12pt;border:none;">Subcontratos</td></tr>';
-  html += '<tr>' + thCell("Nombre") + thCell("Monto") + '</tr>';
+  html += milestonesBlockHTML("Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones);
+  html += milestonesBlockHTML("Materiales — hitos de pago", fin.materials.total, fin.materials.milestones);
+
+  html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Subcontratos</td></tr>';
   if (!fin.subcontracts.length){
-    html += '<tr><td colspan="2" style="color:#999999;">Sin subcontratos.</td></tr>';
+    html += '<tr><td colspan="6" style="color:#999999;">Sin subcontratos.</td></tr>';
   } else {
     fin.subcontracts.forEach(function(s){
-      html += '<tr><td>' + xlsEsc(s.name) + '</td><td>' + (s.amount===null?"":s.amount) + '</td></tr>';
+      html += milestonesBlockHTML("Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones);
     });
   }
-  html += '<tr><td style="border:none;"></td></tr>';
 
   html += '<tr><td colspan="3" style="font-weight:bold;font-size:12pt;border:none;">HH por actividad</td></tr>';
   html += '<tr>' + thCell("Módulo") + thCell("Actividad") + thCell("HH") + '</tr>';
@@ -714,26 +817,6 @@ function buildFinanceSheetHTML(){
     });
   });
   if (!anyHH) html += '<tr><td colspan="3" style="color:#999999;">Sin HH cargadas por actividad.</td></tr>';
-  html += '<tr><td style="border:none;"></td></tr>';
-
-  html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Hitos de cobro y pago</td></tr>';
-  html += '<tr>' + ["Tipo","Descripción","Actividad asociada","Momento","Monto","Semana"].map(thCell).join("") + '</tr>';
-  if (!fin.milestones.length){
-    html += '<tr><td colspan="6" style="color:#999999;">Sin hitos.</td></tr>';
-  } else {
-    fin.milestones.forEach(function(ms){
-      var f = ms.actId ? findActivity(ms.actId) : null;
-      var wk = milestoneWeek(ms);
-      html += '<tr>';
-      html += '<td>' + (ms.type==="cobro"?"Cobro (ingreso)":"Pago (egreso)") + '</td>';
-      html += '<td>' + xlsEsc(ms.desc) + '</td>';
-      html += '<td>' + (f ? xlsEsc(f.mod.name + " › " + f.act.name) : "(sin actividad)") + '</td>';
-      html += '<td>' + (ms.actId ? (ms.moment==="end"?"Fin":"Inicio") : "") + '</td>';
-      html += '<td>' + (ms.amount===null?"":ms.amount) + '</td>';
-      html += '<td>' + (wk===null?"—":("Semana " + (wk+1))) + '</td>';
-      html += '</tr>';
-    });
-  }
   html += '<tr><td style="border:none;"></td></tr>';
 
   html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Flujo de caja acumulado por semana</td></tr>';
@@ -1034,11 +1117,24 @@ function subcontractsTotal(){
   });
   return any ? sum : null;
 }
+function milestoneAmount(total, ms){
+  if (typeof ms.pct === "number" && typeof total === "number") return total * ms.pct / 100;
+  if (typeof ms.legacyAmount === "number") return ms.legacyAmount;
+  return null;
+}
 function milestoneWeek(ms){
-  if (ms.actId){
-    var f = findActivity(ms.actId);
+  if (ms.assocKind === "activity" && ms.assocId){
+    var f = findActivity(ms.assocId);
     if (!f || f.act.start === null) return null;
     return ms.moment === "end" ? f.act.end : f.act.start;
+  }
+  if (ms.assocKind === "module" && ms.assocId){
+    var m = null;
+    for (var i=0;i<state.modules.length;i++){ if (state.modules[i].id === ms.assocId){ m = state.modules[i]; break; } }
+    if (!m) return null;
+    var span = moduleSpan(m);
+    if (!span) return null;
+    return ms.moment === "end" ? span.end : span.start;
   }
   return (typeof ms.manualWeek === "number") ? ms.manualWeek : null;
 }
@@ -1047,31 +1143,93 @@ function cashflowByWeek(){
   var ing = new Array(n), egr = new Array(n);
   for (var z=0; z<n; z++){ ing[z]=0; egr[z]=0; }
   var any = false;
-  state.finance.milestones.forEach(function(ms){
-    if (typeof ms.amount !== "number") return;
-    var wk = milestoneWeek(ms);
-    if (wk === null || wk < 0 || wk >= n) return;
-    any = true;
-    if (ms.type === "cobro") ing[wk] += ms.amount; else egr[wk] += ms.amount;
-  });
+  function process(total, milestones, isIncome){
+    milestones.forEach(function(ms){
+      var amt = milestoneAmount(total, ms);
+      if (amt === null) return;
+      var wk = milestoneWeek(ms);
+      if (wk === null || wk < 0 || wk >= n) return;
+      any = true;
+      if (isIncome) ing[wk] += amt; else egr[wk] += amt;
+    });
+  }
+  process(state.finance.clientContract.total, state.finance.clientContract.milestones, true);
+  process(state.finance.materials.total, state.finance.materials.milestones, false);
+  state.finance.subcontracts.forEach(function(s){ process(s.amount, s.milestones, false); });
   if (!any) return null;
   var ingAcum = [], egrAcum = [], diff = [], ai=0, ae=0;
   for (var i=0;i<n;i++){ ai+=ing[i]; ae+=egr[i]; ingAcum.push(ai); egrAcum.push(ae); diff.push(ai-ae); }
   return { ing:ing, egr:egr, ingAcum:ingAcum, egrAcum:egrAcum, diff:diff };
 }
 
-function fillActivitySelectWithNone(sel, selectedId){
-  sel.innerHTML = "";
-  var noneOpt = el("option"); noneOpt.value = ""; noneOpt.textContent = "(sin actividad — semana manual)";
-  if (!selectedId) noneOpt.selected = true;
-  sel.appendChild(noneOpt);
+// ---- searchable "actividad o módulo" combobox ----
+function normalizeSearch(s){
+  return (s||"").toString().toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");
+}
+function buildAssocOptions(){
+  var opts = [];
   state.modules.forEach(function(m){
+    opts.push({ kind:"module", id:m.id, label: m.name + " (módulo completo)", search: normalizeSearch(m.name) });
     m.activities.forEach(function(a){
-      var opt = el("option"); opt.value = a.id; opt.textContent = m.name + " › " + a.name;
-      if (a.id === selectedId) opt.selected = true;
-      sel.appendChild(opt);
+      opts.push({ kind:"activity", id:a.id, label: m.name + " › " + a.name, search: normalizeSearch(m.name + " " + a.name) });
     });
   });
+  return opts;
+}
+function assocLabel(kind, id){
+  if (kind === "module"){
+    var m = null;
+    for (var i=0;i<state.modules.length;i++){ if (state.modules[i].id === id){ m = state.modules[i]; break; } }
+    return m ? (m.name + " (módulo completo)") : "";
+  }
+  if (kind === "activity"){
+    var f = findActivity(id);
+    return f ? (f.mod.name + " › " + f.act.name) : "";
+  }
+  return "";
+}
+function createAssocCombo(initKind, initId, onSelect){
+  var kind = initKind || null, id = initId || null;
+  var wrap = el("div","assoccombo");
+  var input = el("input","assoccombo-input"); input.type="text"; input.autocomplete="off";
+  input.placeholder = "Buscar actividad o módulo…";
+  input.value = assocLabel(kind, id);
+  var clearBtn = el("button","assoccombo-clear",{text:"×", title:"Quitar asociación (usar semana manual)"});
+  clearBtn.type = "button";
+  var list = el("div","assoccombo-list");
+  list.style.display = "none";
+  wrap.appendChild(input);
+  wrap.appendChild(clearBtn);
+  wrap.appendChild(list);
+
+  function selectOpt(k, i){
+    kind = k; id = i;
+    input.value = assocLabel(kind, id);
+    list.style.display = "none";
+    onSelect(kind, id);
+  }
+  function renderList(filterText){
+    list.innerHTML = "";
+    var q = normalizeSearch(filterText);
+    var filtered = buildAssocOptions().filter(function(o){ return !q || o.search.indexOf(q) !== -1; });
+    if (!filtered.length){
+      list.appendChild(el("div","assoccombo-empty",{text:"Sin resultados"}));
+    } else {
+      filtered.forEach(function(o){
+        var row = el("div", "assoccombo-opt" + (o.kind==="module" ? " assoccombo-opt-module" : ""), {text:o.label});
+        row.addEventListener("mousedown", function(ev){ ev.preventDefault(); selectOpt(o.kind, o.id); });
+        list.appendChild(row);
+      });
+    }
+    list.style.display = "block";
+  }
+  input.addEventListener("focus", function(){ input.select(); renderList(""); });
+  input.addEventListener("input", function(){ renderList(input.value); });
+  input.addEventListener("blur", function(){
+    setTimeout(function(){ list.style.display = "none"; input.value = assocLabel(kind, id); }, 150);
+  });
+  clearBtn.addEventListener("click", function(ev){ ev.preventDefault(); selectOpt(null, null); });
+  return wrap;
 }
 
 function statSpan(label, value){
@@ -1113,6 +1271,93 @@ function mountCashflowChart(cfData){
   });
 }
 
+function newMilestone(){
+  return { id: uid("ms"), desc:"", pct:null, assocKind:null, assocId:null, moment:"start", manualWeek:null };
+}
+
+function buildTotalRow(label, value, onChange){
+  var row = el("div","fintotalrow");
+  row.appendChild(el("span","fintotallabel",{text:label}));
+  var inp = el("input"); inp.type="number"; inp.placeholder="—"; inp.value = value===null?"":value;
+  inp.addEventListener("change", function(ev){ var v=ev.target.value; onChange(v===""?null:parseFloat(v)); });
+  row.appendChild(inp);
+  return row;
+}
+
+function buildMilestoneRow(ms, total, onDelete){
+  var tr = el("tr");
+
+  var tdDesc = el("td"); var descInp = el("input"); descInp.type="text"; descInp.value=ms.desc; descInp.placeholder="Ej: Facturar 30% previo a envío";
+  descInp.addEventListener("change", function(ev){ ms.desc=ev.target.value; save(); });
+  tdDesc.appendChild(descInp); tr.appendChild(tdDesc);
+
+  var tdPct = el("td"); var pctInp = el("input"); pctInp.type="number"; pctInp.min=0; pctInp.max=100; pctInp.step="0.1";
+  pctInp.value = ms.pct===null?"":ms.pct; pctInp.placeholder="%";
+  pctInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.pct = v===""?null:parseFloat(v); save(); renderFinance(); });
+  tdPct.appendChild(pctInp); tr.appendChild(tdPct);
+
+  var tdAmt = el("td");
+  var amt = milestoneAmount(total, ms);
+  tdAmt.appendChild(el("span",null,{text: amt===null ? "—" : ("$ "+fmtNum(amt))}));
+  tr.appendChild(tdAmt);
+
+  var tdAssoc = el("td");
+  var combo = createAssocCombo(ms.assocKind, ms.assocId, function(kind,id){ ms.assocKind=kind; ms.assocId=id; save(); renderFinance(); });
+  tdAssoc.appendChild(combo); tr.appendChild(tdAssoc);
+
+  var tdWhen = el("td");
+  if (ms.assocKind){
+    var momSel = el("select");
+    [["start","Inicio"],["end","Fin"]].forEach(function(o){ var op=el("option"); op.value=o[0]; op.textContent=o[1]; if(ms.moment===o[0]) op.selected=true; momSel.appendChild(op); });
+    momSel.addEventListener("change", function(ev){ ms.moment=ev.target.value; save(); renderFinance(); });
+    tdWhen.appendChild(momSel);
+  } else {
+    var wkInp = el("input"); wkInp.type="number"; wkInp.min=1; wkInp.max=state.weeks;
+    wkInp.value = (typeof ms.manualWeek === "number") ? (ms.manualWeek+1) : "";
+    wkInp.placeholder="Semana manual";
+    wkInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.manualWeek = v===""?null:(parseInt(v,10)-1); save(); renderFinance(); });
+    tdWhen.appendChild(wkInp);
+  }
+  tr.appendChild(tdWhen);
+
+  var tdWeek = el("td");
+  var wk = milestoneWeek(ms);
+  tdWeek.appendChild(el("span","weektag",{text: wk===null ? "—" : ("Semana " + (wk+1))}));
+  tr.appendChild(tdWeek);
+
+  var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
+  delB.addEventListener("click", onDelete);
+  tdDel.appendChild(delB); tr.appendChild(tdDel);
+
+  return tr;
+}
+
+function buildMilestonesTable(total, milestones, onAdd, emptyHint){
+  var wrap = el("div");
+  if (!milestones.length){
+    wrap.appendChild(el("div","empty",{text: emptyHint || "Sin hitos todavía."}));
+  } else {
+    var table = el("table","fintable");
+    var thead = el("thead"); var htr = el("tr");
+    ["Descripción","%","Monto","Asociado a (actividad o módulo)","Inicio/fin o semana manual","Semana",""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
+    thead.appendChild(htr); table.appendChild(thead);
+    var tbody = el("tbody");
+    milestones.forEach(function(ms){
+      tbody.appendChild(buildMilestoneRow(ms, total, function(){
+        var idx = milestones.indexOf(ms);
+        if (idx>=0) milestones.splice(idx,1);
+        save(); renderFinance();
+      }));
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+  }
+  var addBtn = el("button","finaddbtn",{text:"+ Agregar hito"});
+  addBtn.addEventListener("click", onAdd);
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
 function renderFinance(){
   var body = document.getElementById("financeBody");
   var fin = state.finance;
@@ -1127,18 +1372,17 @@ function renderFinance(){
   kpiSection.appendChild(el("h4",null,{text:"Resumen"}));
   var kpiRow = el("div","kpirow");
 
-  var matCard = el("div","kpicard");
-  matCard.appendChild(el("label",null,{text:"Costo materiales total"}));
-  var matInp = el("input"); matInp.type="number"; matInp.placeholder="—"; matInp.value = fin.materialsCost===null?"":fin.materialsCost;
-  matInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.materialsCost = v===""?null:parseFloat(v); save(); renderFinance(); });
-  matCard.appendChild(matInp);
-  kpiRow.appendChild(matCard);
+  function computedCard(label, value, emptyText){
+    var c = el("div","kpicard computed");
+    c.appendChild(el("label",null,{text:label}));
+    c.appendChild(value===null ? el("div","kpivalempty",{text:emptyText}) : el("div","kpival",{text:"$ "+fmtNum(value)}));
+    return c;
+  }
 
+  kpiRow.appendChild(computedCard("Total contrato cliente", fin.clientContract.total, "— sin definir"));
+  kpiRow.appendChild(computedCard("Costo materiales total", fin.materials.total, "— sin definir"));
   var subTotal = subcontractsTotal();
-  var subCard = el("div","kpicard computed");
-  subCard.appendChild(el("label",null,{text:"Costo subcontratos (suma)"}));
-  subCard.appendChild(subTotal===null ? el("div","kpivalempty",{text:"— sin subcontratos"}) : el("div","kpival",{text:"$ "+fmtNum(subTotal)}));
-  kpiRow.appendChild(subCard);
+  kpiRow.appendChild(computedCard("Costo subcontratos (suma)", subTotal, "— sin subcontratos"));
 
   var computedHH = hhSum();
   var hhCard = el("div","kpicard");
@@ -1156,51 +1400,72 @@ function renderFinance(){
   var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
   var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
 
-  var ingCard = el("div","kpicard computed");
-  ingCard.appendChild(el("label",null,{text:"Ingresos totales (hitos)"}));
-  ingCard.appendChild(ingTotal===null ? el("div","kpivalempty",{text:"— sin hitos de cobro"}) : el("div","kpival",{text:"$ "+fmtNum(ingTotal)}));
-  kpiRow.appendChild(ingCard);
-
-  var egrCard = el("div","kpicard computed");
-  egrCard.appendChild(el("label",null,{text:"Egresos totales (hitos)"}));
-  egrCard.appendChild(egrTotal===null ? el("div","kpivalempty",{text:"— sin hitos de pago"}) : el("div","kpival",{text:"$ "+fmtNum(egrTotal)}));
-  kpiRow.appendChild(egrCard);
+  kpiRow.appendChild(computedCard("Ingresos totales (hitos)", ingTotal, "— sin hitos de cobro"));
+  kpiRow.appendChild(computedCard("Egresos totales (hitos)", egrTotal, "— sin hitos de pago"));
 
   kpiSection.appendChild(kpiRow);
-  kpiSection.appendChild(el("div","kpihint",{text:"El costo de materiales y de subcontratos son montos de referencia; para verlos reflejados en el flujo de caja de abajo, crea un hito de pago con esa fecha."}));
+  kpiSection.appendChild(el("div","kpihint",{text:"Los totales de contrato/materiales/subcontratos se ingresan en sus propias secciones más abajo."}));
   body.appendChild(kpiSection);
+
+  // --- Contrato con cliente ---
+  var clientSection = el("div","finsection");
+  clientSection.appendChild(el("h4",null,{text:"Contrato con cliente — hitos de cobro"}));
+  clientSection.appendChild(el("div","kpihint",{text:'Define el monto total del contrato y el % que corresponde a cada hito. Ej: "Facturar 30% previo a envío".'}));
+  clientSection.appendChild(buildTotalRow("Total contrato cliente:", fin.clientContract.total, function(v){ fin.clientContract.total=v; save(); renderFinance(); }));
+  clientSection.appendChild(buildMilestonesTable(fin.clientContract.total, fin.clientContract.milestones, function(){
+    fin.clientContract.milestones.push(newMilestone()); save(); renderFinance();
+  }));
+  body.appendChild(clientSection);
+
+  // --- Materiales ---
+  var matSection = el("div","finsection");
+  matSection.appendChild(el("h4",null,{text:"Materiales — hitos de pago"}));
+  matSection.appendChild(el("div","kpihint",{text:"Define el costo total de materiales y el % que corresponde a cada pago."}));
+  matSection.appendChild(buildTotalRow("Costo materiales total:", fin.materials.total, function(v){ fin.materials.total=v; save(); renderFinance(); }));
+  matSection.appendChild(buildMilestonesTable(fin.materials.total, fin.materials.milestones, function(){
+    fin.materials.milestones.push(newMilestone()); save(); renderFinance();
+  }));
+  body.appendChild(matSection);
 
   // --- Subcontratos ---
   var subSection = el("div","finsection");
   subSection.appendChild(el("h4",null,{text:"Subcontratos"}));
+  subSection.appendChild(el("div","kpihint",{text:'Crea el subcontrato con su monto total y agrega sus hitos de pago (%) directamente aquí. Ej: "Pagar 50% de anticipo previo a inicio del diseño".'}));
   if (!fin.subcontracts.length){
     subSection.appendChild(el("div","empty",{text:"Sin subcontratos agregados."}));
   } else {
-    var subTable = el("table","fintable");
-    var subThead = el("thead"); var subHtr = el("tr");
-    subHtr.appendChild(el("th",null,{text:"Nombre"}));
-    subHtr.appendChild(el("th",null,{text:"Monto"}));
-    subHtr.appendChild(el("th",null,{text:""}));
-    subThead.appendChild(subHtr); subTable.appendChild(subThead);
-    var subTbody = el("tbody");
     fin.subcontracts.forEach(function(s){
-      var tr = el("tr");
-      var tdName = el("td"); var nameInp = el("input"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
+      var card = el("div","subcard");
+      var cardHead = el("div","subcardhead");
+      var nameInp = el("input","subname"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
       nameInp.addEventListener("change", function(ev){ s.name=ev.target.value; save(); });
-      tdName.appendChild(nameInp); tr.appendChild(tdName);
-      var tdAmt = el("td"); var amtInp = el("input"); amtInp.type="number"; amtInp.value=s.amount===null?"":s.amount; amtInp.placeholder="0";
+      cardHead.appendChild(nameInp);
+
+      var amtWrap = el("span","fintotalwrap");
+      amtWrap.appendChild(el("span","fintotallabel",{text:"Monto total:"}));
+      var amtInp = el("input"); amtInp.type="number"; amtInp.value=s.amount===null?"":s.amount; amtInp.placeholder="0";
       amtInp.addEventListener("change", function(ev){ var v=ev.target.value; s.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
-      tdAmt.appendChild(amtInp); tr.appendChild(tdAmt);
-      var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
-      delB.addEventListener("click", function(ss){ return function(){ fin.subcontracts = fin.subcontracts.filter(function(x){return x!==ss;}); save(); renderFinance(); }; }(s));
-      tdDel.appendChild(delB); tr.appendChild(tdDel);
-      subTbody.appendChild(tr);
+      amtWrap.appendChild(amtInp);
+      cardHead.appendChild(amtWrap);
+
+      var delSubBtn = el("button","danger",{text:"Eliminar subcontrato"});
+      delSubBtn.addEventListener("click", function(ss){ return function(){
+        if (!confirmish(delSubBtn, "eliminar subcontrato")) return;
+        fin.subcontracts = fin.subcontracts.filter(function(x){return x!==ss;});
+        save(); renderFinance();
+      }; }(s));
+      cardHead.appendChild(delSubBtn);
+      card.appendChild(cardHead);
+
+      card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
+        s.milestones.push(newMilestone()); save(); renderFinance();
+      }, "Sin hitos de pago para este subcontrato todavía."));
+
+      subSection.appendChild(card);
     });
-    subTable.appendChild(subTbody);
-    subSection.appendChild(subTable);
   }
   var addSubBtn = el("button","finaddbtn",{text:"+ Agregar subcontrato"});
-  addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({name:"", amount:null}); save(); renderFinance(); });
+  addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, milestones:[]}); save(); renderFinance(); });
   subSection.appendChild(addSubBtn);
   body.appendChild(subSection);
 
@@ -1229,72 +1494,6 @@ function renderFinance(){
     hhSection.appendChild(hhTable);
   }
   body.appendChild(hhSection);
-
-  // --- Hitos ---
-  var msSection = el("div","finsection");
-  msSection.appendChild(el("h4",null,{text:"Hitos de cobro y pago"}));
-  if (!fin.milestones.length){
-    msSection.appendChild(el("div","empty",{text:'Sin hitos todavía. Ej: "Facturar 30% al cliente antes del envío" o "Pagar 50% de anticipo al subcontratista X antes de iniciar el diseño".'}));
-  } else {
-    var msTable = el("table","fintable");
-    var msThead = el("thead"); var msHtr = el("tr");
-    ["Tipo","Descripción","Actividad asociada","Momento","Monto","Semana",""].forEach(function(h){ msHtr.appendChild(el("th",null,{text:h})); });
-    msThead.appendChild(msHtr); msTable.appendChild(msThead);
-    var msTbody = el("tbody");
-    fin.milestones.forEach(function(ms){
-      var tr = el("tr");
-
-      var tdType = el("td"); var typeSel = el("select");
-      [["cobro","Cobro (ingreso)"],["pago","Pago (egreso)"]].forEach(function(o){ var op=el("option"); op.value=o[0]; op.textContent=o[1]; if(ms.type===o[0]) op.selected=true; typeSel.appendChild(op); });
-      typeSel.addEventListener("change", function(ev){ ms.type=ev.target.value; save(); renderFinance(); });
-      tdType.appendChild(typeSel); tr.appendChild(tdType);
-
-      var tdDesc = el("td"); var descInp = el("input"); descInp.type="text"; descInp.value=ms.desc; descInp.placeholder="Ej: Facturar 30% previo a envío";
-      descInp.addEventListener("change", function(ev){ ms.desc=ev.target.value; save(); });
-      tdDesc.appendChild(descInp); tr.appendChild(tdDesc);
-
-      var tdAct = el("td"); var actSel = el("select"); fillActivitySelectWithNone(actSel, ms.actId);
-      actSel.addEventListener("change", function(ev){ ms.actId = ev.target.value || null; save(); renderFinance(); });
-      tdAct.appendChild(actSel); tr.appendChild(tdAct);
-
-      var tdMoment = el("td"); var momSel = el("select"); momSel.disabled = !ms.actId;
-      [["start","Inicio"],["end","Fin"]].forEach(function(o){ var op=el("option"); op.value=o[0]; op.textContent=o[1]; if(ms.moment===o[0]) op.selected=true; momSel.appendChild(op); });
-      momSel.addEventListener("change", function(ev){ ms.moment=ev.target.value; save(); renderFinance(); });
-      tdMoment.appendChild(momSel); tr.appendChild(tdMoment);
-
-      var tdAmt = el("td"); var amtInp = el("input"); amtInp.type="number"; amtInp.value=ms.amount===null?"":ms.amount; amtInp.placeholder="0";
-      amtInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
-      tdAmt.appendChild(amtInp); tr.appendChild(tdAmt);
-
-      var tdWeek = el("td");
-      if (ms.actId){
-        var wk = milestoneWeek(ms);
-        tdWeek.appendChild(el("span","weektag",{text: wk===null ? "— (sin fechas)" : ("Semana " + (wk+1))}));
-      } else {
-        var wkInp = el("input"); wkInp.type="number"; wkInp.min=1; wkInp.max=state.weeks;
-        wkInp.value = (typeof ms.manualWeek === "number") ? (ms.manualWeek+1) : "";
-        wkInp.placeholder="Semana";
-        wkInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.manualWeek = v===""?null:(parseInt(v,10)-1); save(); renderFinance(); });
-        tdWeek.appendChild(wkInp);
-      }
-      tr.appendChild(tdWeek);
-
-      var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
-      delB.addEventListener("click", function(mm){ return function(){ fin.milestones = fin.milestones.filter(function(x){return x!==mm;}); save(); renderFinance(); }; }(ms));
-      tdDel.appendChild(delB); tr.appendChild(tdDel);
-
-      msTbody.appendChild(tr);
-    });
-    msTable.appendChild(msTbody);
-    msSection.appendChild(msTable);
-  }
-  var addMsBtn = el("button","finaddbtn",{text:"+ Agregar hito"});
-  addMsBtn.addEventListener("click", function(){
-    fin.milestones.push({ id: uid("ms"), type:"cobro", desc:"", actId:null, moment:"start", amount:null, manualWeek:null });
-    save(); renderFinance();
-  });
-  msSection.appendChild(addMsBtn);
-  body.appendChild(msSection);
 
   // --- Flujo de caja ---
   var chartSection = el("div","finsection");
