@@ -1211,25 +1211,40 @@ function hhCostByWeek(){
   var cost = new Array(n);
   for (var z=0; z<n; z++) cost[z] = 0;
   if (typeof rate !== "number") return { cost: cost, any: false };
-  var any = false;
-  var manual = state.finance.hhManualTotal;
-  if (typeof manual === "number"){
-    var per = (manual*rate)/n;
-    for (var w=0; w<n; w++) cost[w] += per;
-    any = true;
-  } else {
-    state.modules.forEach(function(m){
-      m.activities.forEach(function(a){
-        if (typeof a.hh === "number" && a.start!==null && a.end!==null){
-          var dur = a.end - a.start + 1;
-          var perw = (a.hh*rate)/dur;
-          for (var w=a.start; w<=a.end && w<n; w++) cost[w] += perw;
-          any = true;
-        }
-      });
+
+  // "forma" real: horas por semana según cada actividad, sin aplicar todavía ningún total manual.
+  var shape = new Array(n); for (var z2=0; z2<n; z2++) shape[z2] = 0;
+  var shapeSum = 0, anyShape = false;
+  state.modules.forEach(function(m){
+    m.activities.forEach(function(a){
+      if (typeof a.hh === "number" && a.start!==null && a.end!==null){
+        var dur = a.end - a.start + 1;
+        var perw = a.hh/dur;
+        for (var w=a.start; w<=a.end && w<n; w++) shape[w] += perw;
+        shapeSum += a.hh;
+        anyShape = true;
+      }
     });
+  });
+
+  var manual = state.finance.hhManualTotal;
+
+  if (anyShape){
+    // Usa la distribución real por actividad (respeta dónde se concentran las horas).
+    // Si además hay un total manual, sólo reescala la magnitud total — la forma no cambia.
+    var scale = (typeof manual === "number" && shapeSum > 0) ? (manual/shapeSum) : 1;
+    for (var w2=0; w2<n; w2++) cost[w2] = shape[w2]*rate*scale;
+    return { cost: cost, any: true };
   }
-  return { cost: cost, any: any };
+
+  if (typeof manual === "number"){
+    // Sin desglose por actividad: único dato disponible es un total plano, se reparte parejo.
+    var per = (manual*rate)/n;
+    for (var w3=0; w3<n; w3++) cost[w3] = per;
+    return { cost: cost, any: true };
+  }
+
+  return { cost: cost, any: false };
 }
 
 function cashflowByWeek(){
