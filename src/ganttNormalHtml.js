@@ -57,7 +57,8 @@ button.danger:hover{background:#fbecec;}
 .handle.left{left:0;}
 .handle:hover{background:rgba(0,0,0,0.4);}
 .depsbox{margin-top:16px;}
-.depsbox h3{font-size:12px;font-weight:600;color:#4b5563;margin:0 0 6px;text-transform:uppercase;letter-spacing:.03em;}
+.depsbox h3{font-size:12px;font-weight:600;color:#4b5563;margin:0;text-transform:uppercase;letter-spacing:.03em;}
+.depsheader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:8px;}
 .depform{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px;padding:8px 10px;background:#f7f7f8;border:1px solid #e5e5e8;border-radius:8px;}
 .depform select, .depform input[type=number]{font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
 .depform select{max-width:190px;}
@@ -119,6 +120,12 @@ button.danger:hover{background:#fbecec;}
 .fintable td.actioncell{text-align:right;white-space:nowrap;}
 .fintable td.actioncell button{padding:2px 7px;}
 .fintable .weektag{font-size:10.5px;color:#6b7280;}
+.fintable .weektag.weekwarn{color:#c0392b;font-weight:600;cursor:help;}
+.pctbadge{font-size:11px;margin:2px 0 8px;padding:3px 8px;border-radius:5px;display:inline-block;}
+.pctbadge.pctok{color:#2e7d43;background:rgba(46,125,67,0.08);}
+.pctbadge.pctwarn{color:#c0392b;background:rgba(192,57,43,0.08);}
+.currencyinput{width:64px !important;text-transform:uppercase;}
+.currencywarn{font-size:10.5px;color:#c0392b;cursor:help;white-space:nowrap;}
 .chartwrap{position:relative;height:220px;}
 .finaddbtn{margin-top:2px;}
 .fincashsummary{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#4b5563;margin-top:8px;}
@@ -160,7 +167,11 @@ button.danger:hover{background:#fbecec;}
   <div class="selbar" id="selBar" style="display:none;"></div>
   <div class="grid-outer"><div class="grid" id="grid"></div></div>
   <div class="depsbox">
-    <h3>Dependencias</h3>
+    <div class="depsheader" id="depsHeader">
+      <span class="chevron" id="depsChevron">▾</span>
+      <h3 style="margin:0;">Dependencias</h3>
+    </div>
+    <div id="depsBody">
     <div id="depsBanner"></div>
     <div class="depform">
       <select id="depFrom"></select>
@@ -196,6 +207,7 @@ button.danger:hover{background:#fbecec;}
       </table>
     </div>
     <div id="depsEmpty" class="empty" style="display:none;"></div>
+    </div>
   </div>
   <div class="financebox">
     <div class="financeheader" id="financeHeader">
@@ -292,11 +304,13 @@ function defaultState(){
 
 function defaultFinance(){
   return {
-    clientContract: { total: null, milestones: [] },
-    materials: { total: null, milestones: [] },
+    clientContract: { total: null, currency: null, milestones: [] },
+    materials: { total: null, currency: null, milestones: [] },
     hhManualTotal: null,
     hhRate: null,
     subcontracts: [],
+    mainCurrency: "CLP",
+    currencies: [],
     collapsed: true,
     sectionsCollapsed: { hh: true }
   };
@@ -331,6 +345,7 @@ function migrate(st){
     if (typeof d.delay !== "number") d.delay = 0;
   });
   if (!st.deps) st.deps = [];
+  if (typeof st.depsCollapsed === "undefined") st.depsCollapsed = false;
 
   // semanas: si falta o es inválida, o si hay actividades que se salen del rango, se ajusta sola
   var maxEnd = -1;
@@ -351,12 +366,14 @@ function migrate(st){
     if (!fin.materials) fin.materials = { total: fin.materialsCost, milestones: [] };
     delete fin.materialsCost;
   }
-  if (!fin.materials) fin.materials = { total: null, milestones: [] };
+  if (!fin.materials) fin.materials = { total: null, currency: null, milestones: [] };
   if (typeof fin.materials.total === "undefined") fin.materials.total = null;
+  if (typeof fin.materials.currency === "undefined") fin.materials.currency = null;
   if (!Array.isArray(fin.materials.milestones)) fin.materials.milestones = [];
 
-  if (!fin.clientContract) fin.clientContract = { total: null, milestones: [] };
+  if (!fin.clientContract) fin.clientContract = { total: null, currency: null, milestones: [] };
   if (typeof fin.clientContract.total === "undefined") fin.clientContract.total = null;
+  if (typeof fin.clientContract.currency === "undefined") fin.clientContract.currency = null;
   if (!Array.isArray(fin.clientContract.milestones)) fin.clientContract.milestones = [];
 
   if (typeof fin.hhManualTotal === "undefined") fin.hhManualTotal = null;
@@ -365,6 +382,12 @@ function migrate(st){
   if (typeof fin.collapsed === "undefined") fin.collapsed = true;
   if (!fin.sectionsCollapsed || typeof fin.sectionsCollapsed !== "object") fin.sectionsCollapsed = { hh: true };
   if (typeof fin.sectionsCollapsed.hh === "undefined") fin.sectionsCollapsed.hh = true;
+  if (typeof fin.mainCurrency === "undefined" || !fin.mainCurrency) fin.mainCurrency = "CLP";
+  if (!Array.isArray(fin.currencies)) fin.currencies = [];
+  fin.currencies.forEach(function(c){
+    if (typeof c.code === "undefined" || c.code === null) c.code = "";
+    if (typeof c.rate !== "number") c.rate = null;
+  });
 
   function migrateMilestone(ms){
     if (typeof ms.id === "undefined") ms.id = uid("ms");
@@ -381,6 +404,7 @@ function migrate(st){
     if (typeof s.id === "undefined") s.id = uid("sc");
     if (typeof s.name === "undefined") s.name = "";
     if (typeof s.amount !== "number") s.amount = null;
+    if (typeof s.currency === "undefined") s.currency = null;
     if (!Array.isArray(s.milestones)) s.milestones = [];
     s.milestones.forEach(migrateMilestone);
   });
@@ -784,20 +808,23 @@ function buildGanttSheetHTML(){
   return html;
 }
 
-function milestonesBlockHTML(title, total, milestones){
-  var out = '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">' + xlsEsc(title) + (typeof total==="number" ? (" — total: " + total) : " — (sin total definido)") + '</td></tr>';
-  out += '<tr>' + ["Descripción","%","Monto","Asociado a","Momento","Semana"].map(thCell).join("") + '</tr>';
+function milestonesBlockHTML(title, total, milestones, currency){
+  var curTxt = (currency||"CLP").toUpperCase();
+  var out = '<tr><td colspan="7" style="font-weight:bold;font-size:12pt;border:none;">' + xlsEsc(title) + (typeof total==="number" ? (" — total: " + total + " " + curTxt) : " — (sin total definido)") + '</td></tr>';
+  out += '<tr>' + ["Descripción","%","Monto (moneda propia)","Monto (" + xlsEsc(state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento","Semana"].map(thCell).join("") + '</tr>';
   if (!milestones.length){
-    out += '<tr><td colspan="6" style="color:#999999;">Sin hitos.</td></tr>';
+    out += '<tr><td colspan="7" style="color:#999999;">Sin hitos.</td></tr>';
   } else {
     milestones.forEach(function(ms){
       var amt = milestoneAmount(total, ms);
+      var amtConv = milestoneAmountConverted(total, currency, ms);
       var wk = milestoneWeek(ms);
       var assocTxt = assocLabel(ms.assocKind, ms.assocId) || "(sin asociar)";
       out += '<tr>';
       out += '<td>' + xlsEsc(ms.desc) + '</td>';
       out += '<td>' + (ms.pct===null?"":ms.pct+"%") + '</td>';
-      out += '<td>' + (amt===null?"":amt) + '</td>';
+      out += '<td>' + (amt===null?"":(amt + " " + curTxt)) + '</td>';
+      out += '<td>' + (amtConv===null?"":amtConv) + '</td>';
       out += '<td>' + xlsEsc(assocTxt) + '</td>';
       out += '<td>' + (ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "") + '</td>';
       out += '<td>' + (wk===null?"—":("Semana " + (wk+1))) + '</td>';
@@ -814,12 +841,16 @@ function buildFinanceSheetHTML(){
   html += '<tr><td colspan="6" style="font-size:14pt;font-weight:bold;border:none;">Financiero</td></tr>';
   html += '<tr><td style="border:none;"></td></tr>';
 
+  var mainCur = fin.mainCurrency || "CLP";
   function kpiRow(label, value){
     return '<tr><td style="font-weight:bold;background:#f0f1f3;">' + xlsEsc(label) + '</td><td>' + (value===null||typeof value==="undefined"?"":value) + '</td><td colspan="4" style="border:none;"></td></tr>';
   }
-  html += kpiRow("Total contrato cliente", fin.clientContract.total);
-  html += kpiRow("Costo materiales total", fin.materials.total);
-  html += kpiRow("Costo subcontratos (suma)", subcontractsTotal());
+  html += kpiRow("Moneda principal (totales)", mainCur);
+  html += kpiRow("Total contrato cliente (" + xlsEsc(fin.clientContract.currency||"CLP") + ")", fin.clientContract.total);
+  html += kpiRow("Total contrato cliente (" + xlsEsc(mainCur) + ")", convertedTotal(fin.clientContract.total, fin.clientContract.currency));
+  html += kpiRow("Costo materiales total (" + xlsEsc(fin.materials.currency||"CLP") + ")", fin.materials.total);
+  html += kpiRow("Costo materiales total (" + xlsEsc(mainCur) + ")", convertedTotal(fin.materials.total, fin.materials.currency));
+  html += kpiRow("Costo subcontratos, suma (" + xlsEsc(mainCur) + ")", subcontractsTotal());
   html += kpiRow("HH suma por actividad", hhSum());
   html += kpiRow("HH total (usado en el proyecto)", hhTotal());
   html += kpiRow("Valor HH ($/hora)", fin.hhRate);
@@ -835,16 +866,25 @@ function buildFinanceSheetHTML(){
   if (cf0 && cf0.hasHHCost) html += kpiRow("Diferencia con HH", cf0.diffWithHH[cf0.diffWithHH.length-1]);
   html += '<tr><td style="border:none;"></td></tr>';
 
-  html += milestonesBlockHTML("Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones);
-  html += milestonesBlockHTML("Materiales — hitos de pago", fin.materials.total, fin.materials.milestones);
+  html += milestonesBlockHTML("Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones, fin.clientContract.currency);
+  html += milestonesBlockHTML("Materiales — hitos de pago", fin.materials.total, fin.materials.milestones, fin.materials.currency);
 
-  html += '<tr><td colspan="6" style="font-weight:bold;font-size:12pt;border:none;">Subcontratos</td></tr>';
+  html += '<tr><td colspan="7" style="font-weight:bold;font-size:12pt;border:none;">Subcontratos</td></tr>';
   if (!fin.subcontracts.length){
-    html += '<tr><td colspan="6" style="color:#999999;">Sin subcontratos.</td></tr>';
+    html += '<tr><td colspan="7" style="color:#999999;">Sin subcontratos.</td></tr>';
   } else {
     fin.subcontracts.forEach(function(s){
-      html += milestonesBlockHTML("Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones);
+      html += milestonesBlockHTML("Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones, s.currency);
     });
+  }
+
+  if (fin.currencies.length){
+    html += '<tr><td colspan="4" style="font-weight:bold;font-size:12pt;border:none;">Monedas (tasas de conversión respecto a CLP)</td></tr>';
+    html += '<tr>' + ["Código","Tasa (CLP por 1 unidad)"].map(thCell).join("") + '</tr>';
+    fin.currencies.forEach(function(c){
+      html += '<tr><td>' + xlsEsc(c.code) + '</td><td>' + (c.rate===null?"":c.rate) + '</td></tr>';
+    });
+    html += '<tr><td style="border:none;"></td></tr>';
   }
 
   html += '<tr><td colspan="3" style="font-weight:bold;font-size:12pt;border:none;">HH por actividad</td></tr>';
@@ -1003,6 +1043,9 @@ var depSortDir = 1;
 function renderDepsOnly(){ renderDeps(computeViolations()); }
 
 function renderDeps(vio){
+  document.getElementById("depsChevron").textContent = state.depsCollapsed ? "▸" : "▾";
+  document.getElementById("depsBody").style.display = state.depsCollapsed ? "none" : "block";
+  if (state.depsCollapsed) return;
   var banner = document.getElementById("depsBanner");
   banner.innerHTML = "";
   var nViol = Object.keys(vio.violated).length;
@@ -1144,6 +1187,46 @@ function fmtNum(n){
   try { return Math.round(n).toLocaleString("es-CL"); } catch(e){ return String(Math.round(n)); }
 }
 
+// ---- monedas ----
+// Valores referenciales tomados el 2026-09-07 (tipo de cambio observado ese día). Son solo
+// una sugerencia inicial para no partir de cero — no se actualizan solos, el usuario define
+// el valor real a usar en la sección "Monedas".
+var CURRENCY_RATE_HINTS = { USD: 934.6, EUR: 1085.2 };
+var CURRENCY_RATE_HINTS_DATE = "07-09-2026";
+
+function currencyRate(code){
+  if (!code) return 1;
+  var c = code.toUpperCase();
+  if (c === "CLP") return 1;
+  var found = null;
+  (state.finance.currencies||[]).forEach(function(x){ if (x.code && x.code.toUpperCase() === c) found = x; });
+  return (found && typeof found.rate === "number") ? found.rate : null;
+}
+function toCLP(amount, code){
+  if (typeof amount !== "number") return null;
+  if (!code || code.toUpperCase() === "CLP") return amount;
+  var r = currencyRate(code);
+  return r === null ? null : amount*r;
+}
+function toMainCurrency(amountCLP){
+  if (amountCLP === null || typeof amountCLP === "undefined") return null;
+  var mc = (state.finance.mainCurrency || "CLP").toUpperCase();
+  if (mc === "CLP") return amountCLP;
+  var r = currencyRate(mc);
+  return (r === null || r === 0) ? null : amountCLP/r;
+}
+// Convierte un monto que está en \`code\` hacia la moneda principal de reporte (fin.mainCurrency).
+function convertedTotal(amount, code){
+  return toMainCurrency(toCLP(amount, code));
+}
+function fmtMoneyIn(value, code){
+  if (value === null || typeof value === "undefined") return "—";
+  return fmtNum(value) + " " + ((code||"CLP").toUpperCase());
+}
+function fmtMoney(value){
+  return fmtMoneyIn(value, state.finance.mainCurrency || "CLP");
+}
+
 function hhSum(){
   var sum = 0, any = false;
   state.modules.forEach(function(m){
@@ -1161,7 +1244,10 @@ function hhTotal(){
 function subcontractsTotal(){
   var sum = 0, any = false;
   state.finance.subcontracts.forEach(function(s){
-    if (typeof s.amount === "number"){ sum += s.amount; any = true; }
+    if (typeof s.amount === "number"){
+      var conv = convertedTotal(s.amount, s.currency);
+      if (conv !== null){ sum += conv; any = true; }
+    }
   });
   return any ? sum : null;
 }
@@ -1170,22 +1256,30 @@ function milestoneAmount(total, ms){
   if (typeof ms.legacyAmount === "number") return ms.legacyAmount;
   return null;
 }
+// Same as milestoneAmount() but converts the result from the block's native currency
+// into the reporting currency (state.finance.mainCurrency). Returns null if the amount
+// can't be resolved OR the currency's conversion rate is missing.
+function milestoneAmountConverted(total, currency, ms){
+  var amt = milestoneAmount(total, ms);
+  if (amt === null) return null;
+  return convertedTotal(amt, currency);
+}
 // Every milestone (cliente/materiales/subcontratos) with a resolved week, for the
 // calendar markers row and the cashflow chart markers. Milestones without a resolved
 // week (no asociación ni semana manual) are excluded — nothing to place on a timeline.
 function collectAllMilestones(){
   var out = [];
-  function push(list, total, type, sourceLabel){
+  function push(list, total, currency, type, sourceLabel){
     list.forEach(function(ms){
       var wk = milestoneWeek(ms);
       if (wk === null || wk < 0 || wk >= state.weeks) return;
-      out.push({ desc: ms.desc || "(sin descripción)", type: type, week: wk, amount: milestoneAmount(total, ms), source: sourceLabel });
+      out.push({ desc: ms.desc || "(sin descripción)", type: type, week: wk, amount: milestoneAmountConverted(total, currency, ms), source: sourceLabel });
     });
   }
-  push(state.finance.clientContract.milestones, state.finance.clientContract.total, "cobro", "Cliente");
-  push(state.finance.materials.milestones, state.finance.materials.total, "pago", "Materiales");
+  push(state.finance.clientContract.milestones, state.finance.clientContract.total, state.finance.clientContract.currency, "cobro", "Cliente");
+  push(state.finance.materials.milestones, state.finance.materials.total, state.finance.materials.currency, "pago", "Materiales");
   state.finance.subcontracts.forEach(function(s){
-    push(s.milestones, s.amount, "pago", s.name || "Subcontrato");
+    push(s.milestones, s.amount, s.currency, "pago", s.name || "Subcontrato");
   });
   return out;
 }
@@ -1252,9 +1346,9 @@ function cashflowByWeek(){
   var ing = new Array(n), egr = new Array(n);
   for (var z=0; z<n; z++){ ing[z]=0; egr[z]=0; }
   var any = false;
-  function process(total, milestones, isIncome){
+  function process(total, currency, milestones, isIncome){
     milestones.forEach(function(ms){
-      var amt = milestoneAmount(total, ms);
+      var amt = milestoneAmountConverted(total, currency, ms);
       if (amt === null) return;
       var wk = milestoneWeek(ms);
       if (wk === null || wk < 0 || wk >= n) return;
@@ -1262,9 +1356,9 @@ function cashflowByWeek(){
       if (isIncome) ing[wk] += amt; else egr[wk] += amt;
     });
   }
-  process(state.finance.clientContract.total, state.finance.clientContract.milestones, true);
-  process(state.finance.materials.total, state.finance.materials.milestones, false);
-  state.finance.subcontracts.forEach(function(s){ process(s.amount, s.milestones, false); });
+  process(state.finance.clientContract.total, state.finance.clientContract.currency, state.finance.clientContract.milestones, true);
+  process(state.finance.materials.total, state.finance.materials.currency, state.finance.materials.milestones, false);
+  state.finance.subcontracts.forEach(function(s){ process(s.amount, s.currency, s.milestones, false); });
 
   var hhRes = hhCostByWeek();
   var hhc = hhRes.cost, hasHHCost = hhRes.any;
@@ -1354,8 +1448,18 @@ function createAssocCombo(initKind, initId, onSelect){
 function statSpan(label, value){
   var s = el("span");
   s.appendChild(document.createTextNode(label + ": "));
-  s.appendChild(el("b",null,{text: "$ " + fmtNum(value)}));
+  s.appendChild(el("b",null,{text: fmtMoney(value)}));
   return s;
+}
+
+// Small inline warning shown next to any amount whose currency has no defined
+// conversion rate yet — that amount is silently excluded from totals until fixed.
+function currencyWarningEl(code){
+  if (!code) return null;
+  var c = code.toUpperCase();
+  if (c === "CLP") return null;
+  if (currencyRate(c) !== null) return null;
+  return el("span","currencywarn",{text:"⚠ sin tasa "+c, title:"No hay tasa de conversión definida para "+c+" (sección Monedas). Este monto no se incluye en los totales/gráfico hasta que definas su tasa."});
 }
 
 function mountCashflowChart(cfData){
@@ -1421,9 +1525,9 @@ function mountCashflowChart(cfData){
                 var atW = map[ctx.dataIndex];
                 if (!atW || !atW.length) return null;
                 var arrow = ctx.dataset.label === "Hitos de cobro" ? "↑ " : "↓ ";
-                return atW.map(function(m){ return arrow + m.desc + (m.amount!==null ? (" — $ "+fmtNum(m.amount)) : "") + " (" + m.source + ")"; });
+                return atW.map(function(m){ return arrow + m.desc + (m.amount!==null ? (" — "+fmtMoney(m.amount)) : "") + " (" + m.source + ")"; });
               }
-              return ctx.dataset.label + ": $ " + fmtNum(ctx.parsed.y);
+              return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.y);
             }
           }
         }
@@ -1436,16 +1540,27 @@ function newMilestone(){
   return { id: uid("ms"), desc:"", pct:null, assocKind:null, assocId:null, moment:"start", manualWeek:null };
 }
 
-function buildTotalRow(label, value, onChange){
+function buildTotalRow(label, value, currency, onChangeValue, onChangeCurrency){
   var row = el("div","fintotalrow");
   row.appendChild(el("span","fintotallabel",{text:label}));
   var inp = el("input"); inp.type="number"; inp.placeholder="—"; inp.value = value===null?"":value;
-  inp.addEventListener("change", function(ev){ var v=ev.target.value; onChange(v===""?null:parseFloat(v)); });
+  inp.addEventListener("change", function(ev){ var v=ev.target.value; onChangeValue(v===""?null:parseFloat(v)); });
   row.appendChild(inp);
+  if (onChangeCurrency){
+    var curInp = el("input","currencyinput"); curInp.type="text"; curInp.maxLength=6; curInp.placeholder="CLP";
+    curInp.value = currency || "";
+    curInp.addEventListener("change", function(ev){
+      var v = ev.target.value.trim().toUpperCase();
+      onChangeCurrency(v===""?null:v);
+    });
+    row.appendChild(curInp);
+    var warn = currencyWarningEl(currency);
+    if (warn) row.appendChild(warn);
+  }
   return row;
 }
 
-function buildMilestoneRow(ms, total, onDelete){
+function buildMilestoneRow(ms, total, currencyCode, onDelete){
   var tr = el("tr");
 
   var tdDesc = el("td"); var descInp = el("input"); descInp.type="text"; descInp.value=ms.desc; descInp.placeholder="Ej: Facturar 30% previo a envío";
@@ -1459,7 +1574,7 @@ function buildMilestoneRow(ms, total, onDelete){
 
   var tdAmt = el("td");
   var amt = milestoneAmount(total, ms);
-  tdAmt.appendChild(el("span",null,{text: amt===null ? "—" : ("$ "+fmtNum(amt))}));
+  tdAmt.appendChild(el("span",null,{text: fmtMoneyIn(amt, currencyCode)}));
   tr.appendChild(tdAmt);
 
   var tdAssoc = el("td");
@@ -1483,7 +1598,11 @@ function buildMilestoneRow(ms, total, onDelete){
 
   var tdWeek = el("td");
   var wk = milestoneWeek(ms);
-  tdWeek.appendChild(el("span","weektag",{text: wk===null ? "—" : ("Semana " + (wk+1))}));
+  if (wk === null && typeof ms.pct === "number"){
+    tdWeek.appendChild(el("span","weektag weekwarn",{text:"⚠ sin semana", title:"Tiene % asignado pero no se pudo resolver una semana (revisa la actividad/módulo asociado, o define una semana manual). Mientras tanto, este monto NO se cuenta en los totales de ingresos/egresos."}));
+  } else {
+    tdWeek.appendChild(el("span","weektag",{text: wk===null ? "—" : ("Semana " + (wk+1))}));
+  }
   tr.appendChild(tdWeek);
 
   var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
@@ -1493,7 +1612,21 @@ function buildMilestoneRow(ms, total, onDelete){
   return tr;
 }
 
-function buildMilestonesTable(total, milestones, onAdd, emptyHint){
+function pctSumBadge(milestones){
+  var sum = 0, any = false;
+  milestones.forEach(function(ms){ if (typeof ms.pct === "number"){ sum += ms.pct; any = true; } });
+  if (!any) return null;
+  sum = Math.round(sum*100)/100;
+  var ok = Math.abs(sum-100) < 0.01;
+  var cls = "pctbadge " + (ok ? "pctok" : "pctwarn");
+  var txt;
+  if (ok) txt = "✓ Suma de %: 100%";
+  else if (sum < 100) txt = "⚠ Suma de %: " + sum + "% — falta " + (Math.round((100-sum)*100)/100) + "% por asignar";
+  else txt = "⚠ Suma de %: " + sum + "% — sobra " + (Math.round((sum-100)*100)/100) + "% (suma más de 100%)";
+  return el("div", cls, {text: txt});
+}
+
+function buildMilestonesTable(total, milestones, onAdd, emptyHint, currencyCode){
   var wrap = el("div");
   if (!milestones.length){
     wrap.appendChild(el("div","empty",{text: emptyHint || "Sin hitos todavía."}));
@@ -1504,7 +1637,7 @@ function buildMilestonesTable(total, milestones, onAdd, emptyHint){
     thead.appendChild(htr); table.appendChild(thead);
     var tbody = el("tbody");
     milestones.forEach(function(ms){
-      tbody.appendChild(buildMilestoneRow(ms, total, function(){
+      tbody.appendChild(buildMilestoneRow(ms, total, currencyCode, function(){
         var idx = milestones.indexOf(ms);
         if (idx>=0) milestones.splice(idx,1);
         save(); renderFinance();
@@ -1512,6 +1645,8 @@ function buildMilestonesTable(total, milestones, onAdd, emptyHint){
     });
     table.appendChild(tbody);
     wrap.appendChild(table);
+    var badge = pctSumBadge(milestones);
+    if (badge) wrap.appendChild(badge);
   }
   var addBtn = el("button","finaddbtn",{text:"+ Agregar hito"});
   addBtn.addEventListener("click", onAdd);
@@ -1537,7 +1672,7 @@ function setComputedCardValue(id, value, emptyText){
   var v = document.getElementById(id);
   if (!v) return;
   if (value === null){ v.className = "kpivalempty"; v.textContent = emptyText; }
-  else { v.className = "kpival"; v.textContent = "$ " + fmtNum(value); }
+  else { v.className = "kpival"; v.textContent = fmtMoney(value); }
 }
 
 // Lightweight refresh for numbers that depend on HH/rate, without tearing down
@@ -1592,14 +1727,14 @@ function renderFinance(){
     function computedCard(label, value, emptyText, valId){
       var c = el("div","kpicard computed");
       c.appendChild(el("label",null,{text:label}));
-      var valEl = value===null ? el("div","kpivalempty",{text:emptyText}) : el("div","kpival",{text:"$ "+fmtNum(value)});
+      var valEl = value===null ? el("div","kpivalempty",{text:emptyText}) : el("div","kpival",{text:fmtMoney(value)});
       if (valId) valEl.id = valId;
       c.appendChild(valEl);
       return c;
     }
 
-    kpiRow.appendChild(computedCard("Total contrato cliente", fin.clientContract.total, "— sin definir"));
-    kpiRow.appendChild(computedCard("Costo materiales total", fin.materials.total, "— sin definir"));
+    kpiRow.appendChild(computedCard("Total contrato cliente", convertedTotal(fin.clientContract.total, fin.clientContract.currency), "— sin definir"));
+    kpiRow.appendChild(computedCard("Costo materiales total", convertedTotal(fin.materials.total, fin.materials.currency), "— sin definir"));
     var subTotal = subcontractsTotal();
     kpiRow.appendChild(computedCard("Costo subcontratos (suma)", subTotal, "— sin subcontratos"));
 
@@ -1640,16 +1775,76 @@ function renderFinance(){
   }
   body.appendChild(kpiSection);
 
+  // --- Monedas ---
+  var curSection = el("div","finsection");
+  var curHdr = collapsibleSectionHeader("monedas", "Monedas (opcional)");
+  curSection.appendChild(curHdr.head);
+  if (!curHdr.collapsed){
+    curSection.appendChild(el("div","kpihint",{text:"Si vas a ingresar montos en distintas monedas (materiales, subcontratos, cobros), define aquí la moneda principal para los totales y la tasa de conversión de cada moneda respecto al peso chileno (CLP). Si todo está en CLP, no necesitas tocar esta sección."}));
+
+    var mainRow = el("div","fintotalrow");
+    mainRow.appendChild(el("span","fintotallabel",{text:"Moneda principal (para totales):"}));
+    var mainInp = el("input","currencyinput"); mainInp.type="text"; mainInp.maxLength=6;
+    mainInp.value = fin.mainCurrency || "CLP";
+    mainInp.addEventListener("change", function(ev){
+      var v = ev.target.value.trim().toUpperCase();
+      fin.mainCurrency = v===""?"CLP":v;
+      save(); renderFinance();
+    });
+    mainRow.appendChild(mainInp);
+    curSection.appendChild(mainRow);
+
+    if (!fin.currencies.length){
+      curSection.appendChild(el("div","empty",{text:"Sin monedas adicionales definidas."}));
+    } else {
+      var curTable = el("table","fintable");
+      var curThead = el("thead"); var curHtr = el("tr");
+      ["Código","Tasa (CLP por 1 unidad)","Sugerencia de hoy",""].forEach(function(h){ curHtr.appendChild(el("th",null,{text:h})); });
+      curThead.appendChild(curHtr); curTable.appendChild(curThead);
+      var curTbody = el("tbody");
+      fin.currencies.forEach(function(c){
+        var tr = el("tr");
+        var tdCode = el("td"); var codeInp = el("input"); codeInp.type="text"; codeInp.maxLength=6; codeInp.value=c.code||""; codeInp.placeholder="USD";
+        codeInp.addEventListener("change", function(ev){ c.code = ev.target.value.trim().toUpperCase(); save(); renderFinance(); });
+        tdCode.appendChild(codeInp); tr.appendChild(tdCode);
+
+        var tdRate = el("td"); var rateInp = el("input"); rateInp.type="number"; rateInp.step="0.01"; rateInp.value = c.rate===null?"":c.rate; rateInp.placeholder="—";
+        rateInp.addEventListener("change", function(ev){ var v=ev.target.value; c.rate = v===""?null:parseFloat(v); save(); renderFinance(); });
+        tdRate.appendChild(rateInp); tr.appendChild(tdRate);
+
+        var tdHint = el("td");
+        var hintVal = CURRENCY_RATE_HINTS[(c.code||"").toUpperCase()];
+        tdHint.appendChild(el("span","kpihint",{text: typeof hintVal === "number" ? (fmtNum(hintVal) + " (" + CURRENCY_RATE_HINTS_DATE + ")") : "—"}));
+        tr.appendChild(tdHint);
+
+        var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
+        delB.addEventListener("click", function(cc){ return function(){
+          fin.currencies = fin.currencies.filter(function(x){return x!==cc;});
+          save(); renderFinance();
+        }; }(c));
+        tdDel.appendChild(delB); tr.appendChild(tdDel);
+
+        curTbody.appendChild(tr);
+      });
+      curTable.appendChild(curTbody);
+      curSection.appendChild(curTable);
+    }
+    var addCurBtn = el("button","finaddbtn",{text:"+ Agregar moneda"});
+    addCurBtn.addEventListener("click", function(){ fin.currencies.push({code:"", rate:null}); save(); renderFinance(); });
+    curSection.appendChild(addCurBtn);
+  }
+  body.appendChild(curSection);
+
   // --- Contrato con cliente ---
   var clientSection = el("div","finsection");
   var clientHdr = collapsibleSectionHeader("cliente", "Contrato con cliente — hitos de cobro");
   clientSection.appendChild(clientHdr.head);
   if (!clientHdr.collapsed){
     clientSection.appendChild(el("div","kpihint",{text:'Define el monto total del contrato y el % que corresponde a cada hito. Ej: "Facturar 30% previo a envío".'}));
-    clientSection.appendChild(buildTotalRow("Total contrato cliente:", fin.clientContract.total, function(v){ fin.clientContract.total=v; save(); renderFinance(); }));
+    clientSection.appendChild(buildTotalRow("Total contrato cliente:", fin.clientContract.total, fin.clientContract.currency, function(v){ fin.clientContract.total=v; save(); renderFinance(); }, function(c){ fin.clientContract.currency=c; save(); renderFinance(); }));
     clientSection.appendChild(buildMilestonesTable(fin.clientContract.total, fin.clientContract.milestones, function(){
       fin.clientContract.milestones.push(newMilestone()); save(); renderFinance();
-    }));
+    }, null, fin.clientContract.currency));
   }
   body.appendChild(clientSection);
 
@@ -1659,10 +1854,10 @@ function renderFinance(){
   matSection.appendChild(matHdr.head);
   if (!matHdr.collapsed){
     matSection.appendChild(el("div","kpihint",{text:"Define el costo total de materiales y el % que corresponde a cada pago."}));
-    matSection.appendChild(buildTotalRow("Costo materiales total:", fin.materials.total, function(v){ fin.materials.total=v; save(); renderFinance(); }));
+    matSection.appendChild(buildTotalRow("Costo materiales total:", fin.materials.total, fin.materials.currency, function(v){ fin.materials.total=v; save(); renderFinance(); }, function(c){ fin.materials.currency=c; save(); renderFinance(); }));
     matSection.appendChild(buildMilestonesTable(fin.materials.total, fin.materials.milestones, function(){
       fin.materials.milestones.push(newMilestone()); save(); renderFinance();
-    }));
+    }, null, fin.materials.currency));
   }
   body.appendChild(matSection);
 
@@ -1687,6 +1882,15 @@ function renderFinance(){
         var amtInp = el("input"); amtInp.type="number"; amtInp.value=s.amount===null?"":s.amount; amtInp.placeholder="0";
         amtInp.addEventListener("change", function(ev){ var v=ev.target.value; s.amount = v===""?null:parseFloat(v); save(); renderFinance(); });
         amtWrap.appendChild(amtInp);
+        var curInp = el("input","currencyinput"); curInp.type="text"; curInp.maxLength=6; curInp.placeholder="CLP";
+        curInp.value = s.currency || "";
+        curInp.addEventListener("change", function(ss){ return function(ev){
+          var v = ev.target.value.trim().toUpperCase();
+          ss.currency = v===""?null:v; save(); renderFinance();
+        }; }(s));
+        amtWrap.appendChild(curInp);
+        var scWarn = currencyWarningEl(s.currency);
+        if (scWarn) amtWrap.appendChild(scWarn);
         cardHead.appendChild(amtWrap);
 
         var delSubBtn = el("button","danger",{text:"Eliminar subcontrato"});
@@ -1700,13 +1904,13 @@ function renderFinance(){
 
         card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
           s.milestones.push(newMilestone()); save(); renderFinance();
-        }, "Sin hitos de pago para este subcontrato todavía."));
+        }, "Sin hitos de pago para este subcontrato todavía.", s.currency));
 
         subSection.appendChild(card);
       });
     }
     var addSubBtn = el("button","finaddbtn",{text:"+ Agregar subcontrato"});
-    addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, milestones:[]}); save(); renderFinance(); });
+    addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, currency:null, milestones:[]}); save(); renderFinance(); });
     subSection.appendChild(addSubBtn);
   }
   body.appendChild(subSection);
@@ -1846,6 +2050,11 @@ document.getElementById("financeHeader").addEventListener("click", function(){
   state.finance.collapsed = !state.finance.collapsed;
   save();
   renderFinance();
+});
+document.getElementById("depsHeader").addEventListener("click", function(){
+  state.depsCollapsed = !state.depsCollapsed;
+  save();
+  renderDeps(computeViolations());
 });
 document.getElementById("resetBtn").addEventListener("click", function(){
   if (!confirmish(this, "restaurar el borrador inicial (se perderán tus cambios)")) return;
