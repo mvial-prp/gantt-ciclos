@@ -126,6 +126,8 @@ button.danger:hover{background:#fbecec;}
 .pctbadge.pctwarn{color:#c0392b;background:rgba(192,57,43,0.08);}
 .currencyinput{width:64px !important;text-transform:uppercase;}
 .currencywarn{font-size:10.5px;color:#c0392b;cursor:help;white-space:nowrap;}
+.dirindicator{font-size:11px;color:#6b7280;white-space:nowrap;}
+.dirindicator.dirset{color:#2e7d43;}
 .chartwrap{position:relative;height:220px;}
 .finaddbtn{margin-top:2px;}
 .fincashsummary{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#4b5563;margin-top:8px;}
@@ -162,6 +164,8 @@ button.danger:hover{background:#fbecec;}
     <button id="loadFileBtn">Cargar archivo</button>
     <input type="file" id="loadFileInput" accept=".json" style="display:none;">
     <button id="exportBtn">Exportar a Excel</button>
+    <button id="chooseDirBtn">📁 Elegir carpeta de proyectos</button>
+    <span id="projectsDirIndicator" class="dirindicator"></span>
     <button id="resetBtn" class="danger">Restaurar borrador inicial</button>
   </div>
   <div class="selbar" id="selBar" style="display:none;"></div>
@@ -948,6 +952,141 @@ function buildDepsSheetHTML(){
   return html;
 }
 
+function flashBtn(btn, text, ms){
+  var orig = btn.textContent;
+  btn.textContent = text;
+  setTimeout(function(){ btn.textContent = orig; }, ms || 1600);
+}
+
+// ---- Recordar carpeta de proyectos (File System Access API, con fallback) ----
+// Solo Chrome/Edge soportan showSaveFilePicker/showOpenFilePicker/showDirectoryPicker.
+// Si no hay soporte, o el usuario cancela, o algo falla, todo cae de vuelta al flujo
+// clásico de descarga/<input type=file> — nunca debe romperse la funcionalidad básica.
+var fsSupported = (typeof window.showSaveFilePicker === "function" &&
+                    typeof window.showOpenFilePicker === "function" &&
+                    typeof window.showDirectoryPicker === "function");
+var savedDirHandle = null;
+
+function idbOpen(){
+  return new Promise(function(resolve, reject){
+    if (!("indexedDB" in window)) { reject(new Error("sin indexedDB")); return; }
+    var req = indexedDB.open("ganttWattsFS", 1);
+    req.onupgradeneeded = function(){ req.result.createObjectStore("handles"); };
+    req.onsuccess = function(){ resolve(req.result); };
+    req.onerror = function(){ reject(req.error); };
+  });
+}
+function idbGet(key){
+  return idbOpen().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction("handles", "readonly");
+      var rq = tx.objectStore("handles").get(key);
+      rq.onsuccess = function(){ resolve(rq.result || null); };
+      rq.onerror = function(){ reject(rq.error); };
+    });
+  });
+}
+function idbSet(key, val){
+  return idbOpen().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction("handles", "readwrite");
+      tx.objectStore("handles").put(val, key);
+      tx.oncomplete = function(){ resolve(); };
+      tx.onerror = function(){ reject(tx.error); };
+    });
+  });
+}
+
+function updateDirIndicator(){
+  var indEl = document.getElementById("projectsDirIndicator");
+  if (!indEl) return;
+  if (savedDirHandle){
+    indEl.className = "dirindicator dirset";
+    indEl.textContent = "📁 Carpeta recordada: " + (savedDirHandle.name || "(elegida)");
+    indEl.title = "Guardar archivo / Exportar a Excel / Cargar archivo se abrirán en esta carpeta.";
+  } else {
+    indEl.className = "dirindicator";
+    indEl.textContent = fsSupported ? "📁 Sin carpeta recordada todavía" : "";
+    indEl.title = fsSupported ? 'Click en "Elegir carpeta de proyectos" y selecciona, por ejemplo, la carpeta "Ciclos guardados".' : "";
+  }
+}
+
+// Intenta restaurar la carpeta guardada al cargar la página. No pide permiso aquí
+// (no hay gesto de usuario disponible todavía) — solo actualiza el indicador; el
+// permiso se verifica/pide recién en el próximo click de Guardar/Exportar/Cargar.
+function restoreDirHandle(){
+  if (!fsSupported) return;
+  idbGet("projectsDir").then(function(h){
+    if (h){ savedDirHandle = h; updateDirIndicator(); }
+  }).catch(function(){});
+}
+
+// Se llama dentro de un click handler (hay gesto de usuario), así que puede pedir permiso.
+function ensureDirPermission(handle){
+  return handle.queryPermission({ mode:"readwrite" }).then(function(perm){
+    if (perm === "granted") return true;
+    return handle.requestPermission({ mode:"readwrite" }).then(function(p2){ return p2 === "granted"; });
+  }).catch(function(){ return false; });
+}
+
+function chooseProjectsFolder(){
+  if (!fsSupported){
+    window.alert('Tu navegador no soporta elegir carpeta (usa Chrome o Edge). Seguirá usando el diálogo normal de descarga/apertura.');
+    return;
+  }
+  window.showDirectoryPicker({ mode: "readwrite" }).then(function(handle){
+    savedDirHandle = handle;
+    updateDirIndicator();
+    idbSet("projectsDir", handle);
+  }).catch(function(e){
+    if (e && e.name === "AbortError") return;
+    window.alert("No se pudo elegir la carpeta: " + (e && e.message ? e.message : e));
+  });
+}
+
+// Camino clásico (siempre disponible): descarga vía Blob + <a download>.
+function writeFileClassic(data, mime, filename, btn, okText){
+  var blob = new Blob([data], { type: mime });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  if (btn) flashBtn(btn, okText || "Guardado ✓");
+}
+
+// Intenta guardar usando el File System Access API, sugiriendo la carpeta recordada
+// (si hay una). Si no hay soporte, no hay carpeta, o algo falla/se cancela, cae al
+// camino clásico automáticamente.
+function writeFileSmart(data, mime, filename, ext, btn, okText){
+  if (!fsSupported){ writeFileClassic(data, mime, filename, btn, okText); return; }
+  var opts = { suggestedName: filename, types: [{ description: "Archivo", accept: (function(){ var o={}; o[mime]=[ext]; return o; })() }] };
+  var proceed = function(){
+    if (savedDirHandle) opts.startIn = savedDirHandle;
+    window.showSaveFilePicker(opts).then(function(handle){
+      return handle.createWritable().then(function(writable){
+        return writable.write(data).then(function(){ return writable.close(); });
+      });
+    }).then(function(){
+      if (btn) flashBtn(btn, okText || "Guardado ✓");
+    }).catch(function(e){
+      if (e && e.name === "AbortError") return; // el usuario canceló, no hacer nada
+      writeFileClassic(data, mime, filename, btn, okText);
+    });
+  };
+  if (savedDirHandle){
+    ensureDirPermission(savedDirHandle).then(function(ok){
+      if (!ok) savedDirHandle = null;
+      proceed();
+    });
+  } else {
+    proceed();
+  }
+}
+
 function exportExcel(){
   var sheets = [
     { name: "Gantt", html: buildGanttSheetHTML() },
@@ -961,35 +1100,38 @@ function exportExcel(){
     '<head><meta charset="utf-8">' +
     '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>' + xmlSheets + '</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
     '</head><body>' + sheets.map(function(s){ return s.html; }).join("") + '</body></html>';
-  var blob = new Blob([doc], { type: "application/vnd.ms-excel" });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement("a");
-  a.href = url;
-  a.download = "DESLOG_253795_Watts_Gantt.xls";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function flashBtn(btn, text, ms){
-  var orig = btn.textContent;
-  btn.textContent = text;
-  setTimeout(function(){ btn.textContent = orig; }, ms || 1600);
+  writeFileSmart(doc, "application/vnd.ms-excel", "DESLOG_253795_Watts_Gantt.xls", ".xls", document.getElementById("exportBtn"), "Exportado ✓");
 }
 
 function saveToFile(){
   var data = JSON.stringify(state, null, 2);
-  var blob = new Blob([data], { type: "application/json" });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement("a");
-  a.href = url;
-  a.download = "DESLOG_253795_Watts_Gantt.json";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  flashBtn(document.getElementById("saveFileBtn"), "Guardado ✓");
+  writeFileSmart(data, "application/json", "DESLOG_253795_Watts_Gantt.json", ".json", document.getElementById("saveFileBtn"), "Guardado ✓");
+}
+
+// Intenta abrir usando el File System Access API, sugiriendo la carpeta recordada.
+// Si no hay soporte, no hay carpeta, o algo falla/se cancela, cae al <input type=file> clásico.
+function openFileSmart(){
+  if (!fsSupported){ document.getElementById("loadFileInput").click(); return; }
+  var opts = { types: [{ description: "Proyecto Gantt (JSON)", accept: {"application/json": [".json"]} }] };
+  var proceed = function(){
+    if (savedDirHandle) opts.startIn = savedDirHandle;
+    window.showOpenFilePicker(opts).then(function(handles){
+      return handles[0].getFile();
+    }).then(function(file){
+      loadFromFile(file);
+    }).catch(function(e){
+      if (e && e.name === "AbortError") return;
+      document.getElementById("loadFileInput").click();
+    });
+  };
+  if (savedDirHandle){
+    ensureDirPermission(savedDirHandle).then(function(ok){
+      if (!ok) savedDirHandle = null;
+      proceed();
+    });
+  } else {
+    proceed();
+  }
 }
 
 function loadFromFile(file){
@@ -2018,15 +2160,16 @@ document.getElementById("expandAllBtn").addEventListener("click", function(){
   save(); render();
 });
 document.getElementById("saveFileBtn").addEventListener("click", saveToFile);
-document.getElementById("loadFileBtn").addEventListener("click", function(){
-  document.getElementById("loadFileInput").click();
-});
+document.getElementById("loadFileBtn").addEventListener("click", openFileSmart);
 document.getElementById("loadFileInput").addEventListener("change", function(ev){
   var f = ev.target.files && ev.target.files[0];
   if (f) loadFromFile(f);
   ev.target.value = "";
 });
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
+document.getElementById("chooseDirBtn").addEventListener("click", chooseProjectsFolder);
+restoreDirHandle();
+updateDirIndicator();
 document.getElementById("depFilterText").addEventListener("input", renderDepsOnly);
 document.getElementById("depFilterEstado").addEventListener("change", renderDepsOnly);
 document.querySelectorAll("#depsTable th[data-key]").forEach(function(th){
