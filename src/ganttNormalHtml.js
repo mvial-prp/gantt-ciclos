@@ -35,13 +35,17 @@ button.danger:hover{background:#fbecec;}
 .icobtn{flex:0 0 auto;width:18px;height:18px;border:none;background:transparent;color:#9aa1ac;cursor:pointer;font-size:13px;line-height:1;border-radius:4px;padding:0;}
 .icobtn:hover{background:#eceef1;color:#a12c2c;}
 .icobtn.add:hover{color:#2b6cb0;background:#eaf2fb;}
-.actmenu{position:relative;flex:0 0 auto;}
-.actmenu-panel{position:absolute;top:100%;right:0;z-index:30;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.14);padding:4px;flex-direction:column;gap:2px;min-width:180px;}
-.actmenu-panel .actmenu-item{font-size:11px;padding:4px 6px;border-radius:4px;cursor:pointer;color:#1f2430;text-align:left;}
-.actmenu-panel button.actmenu-item{border:none;background:transparent;}
-.actmenu-panel button.actmenu-item:hover{background:#eaf2fb;}
-.actmenu-panel button.actmenu-item:disabled{color:#c7cad0;cursor:not-allowed;}
-.actmenu-panel select.actmenu-item{border:1px solid #d1d5db;background:#fff;width:100%;}
+.draghandle{flex:0 0 auto;width:14px;height:18px;display:flex;align-items:center;justify-content:center;color:#9aa1ac;cursor:grab;font-size:12px;line-height:1;}
+.draghandle:hover{color:#4b5563;}
+.dragging{opacity:0.4;}
+.dragover-before{box-shadow: inset 0 2px 0 0 #2b6cb0;}
+.dragover-after{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
+.moduleband.dragover-module{box-shadow: inset 0 0 0 2px #2b6cb0;}
+tr.dragover-before td{box-shadow: inset 0 2px 0 0 #2b6cb0;}
+tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
+.subcard.dragging{opacity:0.4;}
+.subcard.dragover-before{box-shadow: inset 0 2px 0 0 #2b6cb0;}
+.subcard.dragover-after{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .moveselect{font-size:10.5px;padding:1px 3px;border:1px solid #d1d5db;border-radius:4px;background:#fff;max-width:110px;flex:0 0 auto;}
 .selchk{flex:0 0 auto;width:13px;height:13px;margin-right:2px;cursor:pointer;}
 .selectedrow{background:#eaf2fb;}
@@ -584,6 +588,18 @@ function moveArrayItem(arr, item, dir){
   var tmp = arr[idx]; arr[idx] = arr[newIdx]; arr[newIdx] = tmp;
   return true;
 }
+// Helper genérico para arrastrar-y-soltar: mueve \`item\` justo antes/después de
+// \`refItem\` dentro del mismo arreglo (usado para dependencias y subcontratos).
+function moveArrayItemRelative(arr, item, refItem, before){
+  if (item === refItem) return false;
+  var idx = arr.indexOf(item);
+  if (idx < 0) return false;
+  arr.splice(idx, 1);
+  var refIdx = arr.indexOf(refItem);
+  if (refIdx < 0){ arr.splice(idx, 0, item); return false; }
+  arr.splice(before ? refIdx : refIdx+1, 0, item);
+  return true;
+}
 // Select reutilizable para elegir un módulo destino (usado para mover actividades
 // y para convertir un módulo de una sola actividad en actividad de otro módulo).
 function buildModuleTargetSelect(excludeModId, placeholderText, onSelect){
@@ -603,52 +619,36 @@ function buildModuleTargetSelect(excludeModId, placeholderText, onSelect){
   return sel;
 }
 
-var openActMenu = null;
-function closeActMenu(){
-  if (openActMenu){ openActMenu.remove(); openActMenu = null; }
+// ---- Arrastrar y soltar actividades: reordenar dentro de un módulo y mover entre módulos ----
+var dragSrc = null; // { actId } de la actividad que se está arrastrando
+var dragDepId = null;  // id de la dependencia que se está arrastrando (tabla de Dependencias)
+var dragSubId = null;  // id del subcontrato que se está arrastrando (tarjetas de Subcontratos)
+
+// Mueve la actividad \`actId\` justo antes/después de \`refActId\`, cambiándola de
+// módulo si \`refActId\` pertenece a otro. No hace nada si son la misma actividad.
+function moveActivityRelative(actId, refActId, before){
+  if (actId === refActId) return false;
+  var src = findActivity(actId);
+  var ref = findActivity(refActId);
+  if (!src || !ref) return false;
+  src.mod.activities.splice(src.idx, 1);
+  var ref2 = findActivity(refActId); // reubicar: su índice puede haber cambiado si era el mismo módulo
+  if (!ref2) return false;
+  var insertIdx = before ? ref2.idx : ref2.idx + 1;
+  ref2.mod.activities.splice(insertIdx, 0, src.act);
+  save();
+  return true;
 }
-document.addEventListener("click", function(){ closeActMenu(); });
-
-// Menú "⋮" por actividad: subir, bajar, mover a otro módulo, convertir en módulo propio.
-function buildActivityMenu(mod, act){
-  var wrap = el("div","actmenu");
-  var toggle = el("button","icobtn",{text:"⋮", title:"Reordenar / mover / convertir"});
-  var panel = el("div","actmenu-panel");
-  panel.style.display = "none";
-  toggle.addEventListener("click", function(ev){
-    ev.stopPropagation();
-    var willOpen = panel.style.display === "none";
-    closeActMenu();
-    if (willOpen){ panel.style.display = "flex"; openActMenu = panel; }
-  });
-  panel.addEventListener("click", function(ev){ ev.stopPropagation(); });
-
-  var idx = mod.activities.indexOf(act);
-  var upBtn = el("button","actmenu-item",{text:"▲ Subir"});
-  upBtn.disabled = (idx <= 0);
-  upBtn.addEventListener("click", function(){ moveActivityUpDown(mod.id, act.id, -1); closeActMenu(); });
-  panel.appendChild(upBtn);
-
-  var downBtn = el("button","actmenu-item",{text:"▼ Bajar"});
-  downBtn.disabled = (idx >= mod.activities.length-1);
-  downBtn.addEventListener("click", function(){ moveActivityUpDown(mod.id, act.id, 1); closeActMenu(); });
-  panel.appendChild(downBtn);
-
-  if (state.modules.length > 1){
-    var moveSel = buildModuleTargetSelect(mod.id, "Mover a módulo…", function(targetId){
-      moveActivityToModule(act.id, targetId); closeActMenu();
-    });
-    moveSel.className += " actmenu-item";
-    panel.appendChild(moveSel);
-  }
-
-  var convBtn = el("button","actmenu-item",{text:"⇥ Convertir en módulo propio"});
-  convBtn.addEventListener("click", function(){ convertActivityToModule(act.id); closeActMenu(); });
-  panel.appendChild(convBtn);
-
-  wrap.appendChild(toggle);
-  wrap.appendChild(panel);
-  return wrap;
+// Mueve la actividad al final de otro módulo (soltar sobre la banda del módulo).
+function moveActivityToModuleEnd(actId, targetModId){
+  var src = findActivity(actId);
+  var target = findModuleById(targetModId);
+  if (!src || !target) return false;
+  if (src.mod.id === targetModId) return false;
+  src.mod.activities.splice(src.idx, 1);
+  target.activities.push(src.act);
+  save();
+  return true;
 }
 
 function el(tag, cls, attrs){
@@ -910,6 +910,23 @@ function render(){
       if (span && w2>=span.start && w2<=span.end) band.style.setProperty("--bandc", hexToTint(m.color));
       mrow.appendChild(band);
     }
+    mrow.dataset.modId = m.id;
+    // Soltar una actividad arrastrada sobre la banda del módulo: se agrega al final de ese módulo.
+    mrow.addEventListener("dragover", function(mm){ return function(ev){
+      if (!dragSrc) return;
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+      mrow.classList.add("dragover-module");
+    }; }(m));
+    mrow.addEventListener("dragleave", function(){ mrow.classList.remove("dragover-module"); });
+    mrow.addEventListener("drop", function(mm){ return function(ev){
+      if (!dragSrc) return;
+      ev.preventDefault();
+      mrow.classList.remove("dragover-module");
+      moveActivityToModuleEnd(dragSrc.actId, mm.id);
+      dragSrc = null;
+      render();
+    }; }(m));
     grid.appendChild(mrow);
 
     if (m.collapsed) return;
@@ -933,7 +950,23 @@ function render(){
       alabel.appendChild(an);
       var dl = durationLabel(a);
       if (dl) alabel.appendChild(el("span","durbadge",{text: dl}));
-      alabel.appendChild(buildActivityMenu(m, a));
+      var convBtn = el("button","icobtn",{text:"⇥", title:"Convertir en módulo propio"});
+      convBtn.addEventListener("click", function(aa){ return function(ev){ ev.stopPropagation(); convertActivityToModule(aa.id); }; }(a));
+      alabel.appendChild(convBtn);
+      var dragHandle = el("span","draghandle",{text:"⠿", title:"Arrastrar para reordenar o mover a otro módulo"});
+      dragHandle.setAttribute("draggable","true");
+      dragHandle.addEventListener("dragstart", function(aa,rowEl){ return function(ev){
+        dragSrc = { actId: aa.id };
+        rowEl.classList.add("dragging");
+        if (ev.dataTransfer){
+          try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", aa.id); } catch(e){}
+        }
+      }; }(a, arow));
+      dragHandle.addEventListener("dragend", function(rowEl){ return function(){
+        dragSrc = null;
+        rowEl.classList.remove("dragging");
+      }; }(arow));
+      alabel.appendChild(dragHandle);
       var delA = el("button","icobtn",{text:"✕", title:"Eliminar actividad"});
       delA.addEventListener("click", function(mm,aa){ return function(){
         if (!confirmish(delA, "eliminar actividad")) return;
@@ -943,6 +976,31 @@ function render(){
       }; }(m,a));
       alabel.appendChild(delA);
       arow.appendChild(alabel);
+      arow.dataset.actId = a.id;
+      arow.addEventListener("dragover", function(aa,rowEl){ return function(ev){
+        if (!dragSrc) return;
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+        var rect = rowEl.getBoundingClientRect();
+        var before = (ev.clientY - rect.top) < (rect.height/2);
+        rowEl.classList.remove("dragover-before","dragover-after");
+        rowEl.classList.add(before ? "dragover-before" : "dragover-after");
+      }; }(a, arow));
+      arow.addEventListener("dragleave", function(rowEl){ return function(){
+        rowEl.classList.remove("dragover-before","dragover-after");
+      }; }(arow));
+      arow.addEventListener("drop", function(aa,rowEl){ return function(ev){
+        if (!dragSrc) return;
+        ev.preventDefault();
+        rowEl.classList.remove("dragover-before","dragover-after");
+        if (dragSrc.actId !== aa.id){
+          var rect = rowEl.getBoundingClientRect();
+          var before = (ev.clientY - rect.top) < (rect.height/2);
+          moveActivityRelative(dragSrc.actId, aa.id, before);
+        }
+        dragSrc = null;
+        render();
+      }; }(a, arow));
 
       for (var w3=0; w3<state.weeks; w3++){
         var isFilled = a.start!==null && w3>=a.start && w3<=a.end;
@@ -1142,10 +1200,10 @@ function buildFinanceSheetHTML(){
   html += kpiRow("Costo subcontratos, suma (" + xlsEsc(mainCur) + ")", subcontractsTotal());
   html += kpiRow("HH suma por actividad", hhSum());
   html += kpiRow("HH total (usado en el proyecto)", hhTotal());
-  html += kpiRow("Valor HH (" + xlsEsc(fin.hhRateCurrency||"UF") + "/hora)", fin.hhRate);
+  html += kpiRow("Valor HH (" + xlsEsc(fin.hhRateCurrency||"CLP") + "/hora)", fin.hhRate);
   var hhTot0 = hhTotal();
   var hhCostTotal0Native = (typeof fin.hhRate === "number" && hhTot0 !== null) ? hhTot0*fin.hhRate : null;
-  html += kpiRow("Costo HH total (" + xlsEsc(fin.hhRateCurrency||"UF") + ")", hhCostTotal0Native);
+  html += kpiRow("Costo HH total (" + xlsEsc(fin.hhRateCurrency||"CLP") + ")", hhCostTotal0Native);
   html += kpiRow("Costo HH total (" + xlsEsc(mainCur) + ")", convertedTotal(hhCostTotal0Native, fin.hhRateCurrency));
   var cf0 = cashflowByWeek();
   var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
@@ -1551,6 +1609,7 @@ function renderDeps(vio){
   filtered.forEach(function(r){
     var d = r.d;
     var tr = el("tr", r.isBad ? "violated" : "");
+    tr.dataset.depId = d.id;
 
     var tdOrigen = el("td");
     var fromSel = el("select"); fillActivitySelect(fromSel, d.from);
@@ -1585,15 +1644,38 @@ function renderDeps(vio){
     var tdActions = el("td","actioncell");
     var naturalOrder = !depSortKey && !filterText && !filterEstado;
     if (naturalOrder && state.deps.length > 1){
-      var depIdx = state.deps.indexOf(d);
-      var upDepBtn = el("button","icobtn",{text:"▲", title:"Subir"});
-      upDepBtn.disabled = (depIdx <= 0);
-      upDepBtn.addEventListener("click", function(){ moveArrayItem(state.deps, d, -1); save(); renderDepsOnly(); });
-      tdActions.appendChild(upDepBtn);
-      var downDepBtn = el("button","icobtn",{text:"▼", title:"Bajar"});
-      downDepBtn.disabled = (depIdx >= state.deps.length-1);
-      downDepBtn.addEventListener("click", function(){ moveArrayItem(state.deps, d, 1); save(); renderDepsOnly(); });
-      tdActions.appendChild(downDepBtn);
+      var dragDepHandle = el("span","draghandle",{text:"⠿", title:"Arrastrar para reordenar"});
+      dragDepHandle.setAttribute("draggable","true");
+      dragDepHandle.addEventListener("dragstart", function(dd){ return function(ev){
+        dragDepId = dd.id;
+        tr.classList.add("dragging");
+        if (ev.dataTransfer){ try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", dd.id); } catch(e){} }
+      }; }(d));
+      dragDepHandle.addEventListener("dragend", function(){ dragDepId = null; tr.classList.remove("dragging"); });
+      tdActions.appendChild(dragDepHandle);
+      tr.addEventListener("dragover", function(dd){ return function(ev){
+        if (!dragDepId) return;
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+        var rect = tr.getBoundingClientRect();
+        var before = (ev.clientY - rect.top) < (rect.height/2);
+        tr.classList.remove("dragover-before","dragover-after");
+        tr.classList.add(before ? "dragover-before" : "dragover-after");
+      }; }(d));
+      tr.addEventListener("dragleave", function(){ tr.classList.remove("dragover-before","dragover-after"); });
+      tr.addEventListener("drop", function(dd){ return function(ev){
+        if (!dragDepId) return;
+        ev.preventDefault();
+        tr.classList.remove("dragover-before","dragover-after");
+        if (dragDepId !== dd.id){
+          var rect = tr.getBoundingClientRect();
+          var before = (ev.clientY - rect.top) < (rect.height/2);
+          var srcDep = state.deps.find(function(x){ return x.id === dragDepId; });
+          if (srcDep){ moveArrayItemRelative(state.deps, srcDep, dd, before); save(); }
+        }
+        dragDepId = null;
+        renderDepsOnly();
+      }; }(d));
     }
     var delB = el("button",null,{text:"Eliminar"});
     delB.addEventListener("click", function(){
@@ -2253,11 +2335,11 @@ function renderFinance(){
     rateInp.value = fin.hhRate===null?"":fin.hhRate;
     rateInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.hhRate = v===""?null:parseFloat(v); save(); renderFinance(); });
     rateWrap.appendChild(rateInp);
-    var rateCurInp = el("input","currencyinput"); rateCurInp.type="text"; rateCurInp.maxLength=6; rateCurInp.placeholder="UF";
+    var rateCurInp = el("input","currencyinput"); rateCurInp.type="text"; rateCurInp.maxLength=6; rateCurInp.placeholder="CLP";
     rateCurInp.value = fin.hhRateCurrency || "";
     rateCurInp.addEventListener("change", function(ev){
       var v = ev.target.value.trim().toUpperCase();
-      fin.hhRateCurrency = v===""?"UF":v;
+      fin.hhRateCurrency = v===""?null:v;
       save(); renderFinance();
     });
     rateWrap.appendChild(rateCurInp);
@@ -2386,6 +2468,7 @@ function renderFinance(){
     } else {
       fin.subcontracts.forEach(function(s){
         var card = el("div","subcard");
+        card.dataset.subId = s.id;
         var cardHead = el("div","subcardhead");
         var nameInp = el("input","subname"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
         nameInp.addEventListener("change", function(ev){ s.name=ev.target.value; save(); });
@@ -2416,15 +2499,15 @@ function renderFinance(){
         cardHead.appendChild(amtWrap);
 
         if (fin.subcontracts.length > 1){
-          var subIdx = fin.subcontracts.indexOf(s);
-          var upSubBtn = el("button","icobtn",{text:"▲", title:"Subir"});
-          upSubBtn.disabled = (subIdx <= 0);
-          upSubBtn.addEventListener("click", function(){ moveArrayItem(fin.subcontracts, s, -1); save(); renderFinance(); });
-          cardHead.appendChild(upSubBtn);
-          var downSubBtn = el("button","icobtn",{text:"▼", title:"Bajar"});
-          downSubBtn.disabled = (subIdx >= fin.subcontracts.length-1);
-          downSubBtn.addEventListener("click", function(){ moveArrayItem(fin.subcontracts, s, 1); save(); renderFinance(); });
-          cardHead.appendChild(downSubBtn);
+          var dragSubHandle = el("span","draghandle",{text:"⠿", title:"Arrastrar para reordenar"});
+          dragSubHandle.setAttribute("draggable","true");
+          dragSubHandle.addEventListener("dragstart", function(ss){ return function(ev){
+            dragSubId = ss.id;
+            card.classList.add("dragging");
+            if (ev.dataTransfer){ try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", ss.id); } catch(e){} }
+          }; }(s));
+          dragSubHandle.addEventListener("dragend", function(){ dragSubId = null; card.classList.remove("dragging"); });
+          cardHead.appendChild(dragSubHandle);
         }
         var delSubBtn = el("button","danger",{text:"Eliminar subcontrato"});
         delSubBtn.addEventListener("click", function(ss){ return function(){
@@ -2434,6 +2517,29 @@ function renderFinance(){
         }; }(s));
         cardHead.appendChild(delSubBtn);
         card.appendChild(cardHead);
+        card.addEventListener("dragover", function(ss){ return function(ev){
+          if (!dragSubId) return;
+          ev.preventDefault();
+          if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+          var rect = card.getBoundingClientRect();
+          var before = (ev.clientY - rect.top) < (rect.height/2);
+          card.classList.remove("dragover-before","dragover-after");
+          card.classList.add(before ? "dragover-before" : "dragover-after");
+        }; }(s));
+        card.addEventListener("dragleave", function(){ card.classList.remove("dragover-before","dragover-after"); });
+        card.addEventListener("drop", function(ss){ return function(ev){
+          if (!dragSubId) return;
+          ev.preventDefault();
+          card.classList.remove("dragover-before","dragover-after");
+          if (dragSubId !== ss.id){
+            var rect = card.getBoundingClientRect();
+            var before = (ev.clientY - rect.top) < (rect.height/2);
+            var srcSub = fin.subcontracts.find(function(x){ return x.id === dragSubId; });
+            if (srcSub){ moveArrayItemRelative(fin.subcontracts, srcSub, ss, before); save(); }
+          }
+          dragSubId = null;
+          renderFinance();
+        }; }(s));
 
         card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
           s.milestones.push(newMilestone()); save(); renderFinance();
