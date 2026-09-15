@@ -35,6 +35,14 @@ button.danger:hover{background:#fbecec;}
 .icobtn{flex:0 0 auto;width:18px;height:18px;border:none;background:transparent;color:#9aa1ac;cursor:pointer;font-size:13px;line-height:1;border-radius:4px;padding:0;}
 .icobtn:hover{background:#eceef1;color:#a12c2c;}
 .icobtn.add:hover{color:#2b6cb0;background:#eaf2fb;}
+.actmenu{position:relative;flex:0 0 auto;}
+.actmenu-panel{position:absolute;top:100%;right:0;z-index:30;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.14);padding:4px;flex-direction:column;gap:2px;min-width:180px;}
+.actmenu-panel .actmenu-item{font-size:11px;padding:4px 6px;border-radius:4px;cursor:pointer;color:#1f2430;text-align:left;}
+.actmenu-panel button.actmenu-item{border:none;background:transparent;}
+.actmenu-panel button.actmenu-item:hover{background:#eaf2fb;}
+.actmenu-panel button.actmenu-item:disabled{color:#c7cad0;cursor:not-allowed;}
+.actmenu-panel select.actmenu-item{border:1px solid #d1d5db;background:#fff;width:100%;}
+.moveselect{font-size:10.5px;padding:1px 3px;border:1px solid #d1d5db;border-radius:4px;background:#fff;max-width:110px;flex:0 0 auto;}
 .selchk{flex:0 0 auto;width:13px;height:13px;margin-right:2px;cursor:pointer;}
 .selectedrow{background:#eaf2fb;}
 .selectedrow .label{background:#eaf2fb;}
@@ -45,6 +53,9 @@ button.danger:hover{background:#fbecec;}
 .week.filled{background:var(--c,#94a3b8);}
 .week.filled:hover{filter:brightness(0.92);}
 .week.violated{outline:2px solid #c0392b;outline-offset:-2px;}
+.week.filled.criticalcell{box-shadow: inset 0 0 0 2px #6b46c1;}
+.critpathinfo{font-size:11px;color:#6b46c1;white-space:nowrap;}
+.critpathinfo.criterror{color:#c0392b;}
 .moduleband .week{background:var(--bandc,#fff);cursor:default;}
 .weeknum{display:flex;align-items:center;justify-content:center;font-size:10px;color:#9aa1ac;border-right:1px solid #f0f0f1;}
 .row.hitosrow{height:14px;position:sticky;top:32px;background:#fafbfc;z-index:3;border-bottom:1px solid #eee;}
@@ -126,6 +137,7 @@ button.danger:hover{background:#fbecec;}
 .pctbadge.pctwarn{color:#c0392b;background:rgba(192,57,43,0.08);}
 .currencyinput{width:64px !important;text-transform:uppercase;}
 .currencywarn{font-size:10.5px;color:#c0392b;cursor:help;white-space:nowrap;}
+.convertedhint{white-space:nowrap;font-style:italic;}
 .dirindicator{font-size:11px;color:#6b7280;white-space:nowrap;}
 .dirindicator.dirset{color:#2e7d43;}
 .chartwrap{position:relative;height:220px;}
@@ -166,6 +178,14 @@ button.danger:hover{background:#fbecec;}
     <button id="exportBtn">Exportar a Excel</button>
     <button id="chooseDirBtn">📁 Elegir carpeta de proyectos</button>
     <span id="projectsDirIndicator" class="dirindicator"></span>
+    <label>Ruta crítica
+      <select id="critPathMode">
+        <option value="">Ninguna</option>
+        <option value="cpm">CPM clásico (duración + dependencias)</option>
+        <option value="actual">Recomendación (cronograma actual + dependencias)</option>
+      </select>
+    </label>
+    <span id="critPathInfo" class="critpathinfo"></span>
     <button id="resetBtn" class="danger">Restaurar borrador inicial</button>
   </div>
   <div class="selbar" id="selBar" style="display:none;"></div>
@@ -312,9 +332,10 @@ function defaultFinance(){
     materials: { total: null, currency: null, milestones: [] },
     hhManualTotal: null,
     hhRate: null,
+    hhRateCurrency: "UF",
     subcontracts: [],
     mainCurrency: "CLP",
-    currencies: [],
+    currencies: [{ code: "UF", rate: null }],
     collapsed: true,
     sectionsCollapsed: { hh: true }
   };
@@ -382,6 +403,13 @@ function migrate(st){
 
   if (typeof fin.hhManualTotal === "undefined") fin.hhManualTotal = null;
   if (typeof fin.hhRate === "undefined") fin.hhRate = null;
+  // Archivos antiguos (de antes de que existiera este campo) que ya tenían un
+  // "Valor HH" numérico se asumen en CLP (implícito, igual que otros bloques) para
+  // no reinterpretar silenciosamente un valor ya cargado como si fuera otra moneda.
+  // Solo un proyecto realmente nuevo (sin valor HH todavía) sugiere UF por defecto.
+  if (typeof fin.hhRateCurrency === "undefined"){
+    fin.hhRateCurrency = (typeof fin.hhRate === "number") ? null : "UF";
+  }
   if (!Array.isArray(fin.subcontracts)) fin.subcontracts = [];
   if (typeof fin.collapsed === "undefined") fin.collapsed = true;
   if (!fin.sectionsCollapsed || typeof fin.sectionsCollapsed !== "object") fin.sectionsCollapsed = { hh: true };
@@ -500,6 +528,129 @@ function allActivitiesFlat(){
   return out;
 }
 
+// ---- reordenar / mover / convertir actividades y módulos ----
+function findModuleById(modId){
+  for (var i=0;i<state.modules.length;i++){ if (state.modules[i].id === modId) return state.modules[i]; }
+  return null;
+}
+function moveActivityUpDown(modId, actId, dir){
+  var m = findModuleById(modId);
+  if (!m) return;
+  var idx = m.activities.findIndex(function(a){ return a.id === actId; });
+  if (idx < 0) return;
+  var newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= m.activities.length) return;
+  var tmp = m.activities[idx]; m.activities[idx] = m.activities[newIdx]; m.activities[newIdx] = tmp;
+  save(); render();
+}
+function moveActivityToModule(actId, targetModId){
+  var found = findActivity(actId);
+  if (!found) return;
+  if (found.mod.id === targetModId) return;
+  var target = findModuleById(targetModId);
+  if (!target) return;
+  found.mod.activities.splice(found.idx, 1);
+  target.activities.push(found.act);
+  save(); render();
+}
+// Actividad → módulo nuevo que contiene solo esa actividad.
+function convertActivityToModule(actId){
+  var found = findActivity(actId);
+  if (!found) return;
+  var srcIdx = state.modules.indexOf(found.mod);
+  found.mod.activities.splice(found.idx, 1);
+  var newMod = { id: uid("mod"), name: found.act.name || "Nuevo módulo", color: nextColor(), collapsed:false, activities:[found.act] };
+  state.modules.splice(srcIdx+1, 0, newMod);
+  save(); render();
+}
+// Módulo (con una sola actividad) → esa actividad pasa a otro módulo existente,
+// y el módulo (ahora vacío) se elimina.
+function convertModuleToActivityIn(modId, targetModId){
+  var m = findModuleById(modId);
+  if (!m || m.activities.length !== 1) return;
+  var target = findModuleById(targetModId);
+  if (!target || target === m) return;
+  target.activities.push(m.activities[0]);
+  state.modules = state.modules.filter(function(x){ return x !== m; });
+  save(); render();
+}
+// Helper genérico de reordenamiento: sube/baja un elemento dentro de un arreglo
+// (usado para dependencias, hitos de pago y subcontratos). Devuelve true si movió algo.
+function moveArrayItem(arr, item, dir){
+  var idx = arr.indexOf(item);
+  if (idx < 0) return false;
+  var newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= arr.length) return false;
+  var tmp = arr[idx]; arr[idx] = arr[newIdx]; arr[newIdx] = tmp;
+  return true;
+}
+// Select reutilizable para elegir un módulo destino (usado para mover actividades
+// y para convertir un módulo de una sola actividad en actividad de otro módulo).
+function buildModuleTargetSelect(excludeModId, placeholderText, onSelect){
+  var sel = el("select","moveselect");
+  var ph = el("option",null,{text:placeholderText}); ph.value = "";
+  sel.appendChild(ph);
+  state.modules.forEach(function(m){
+    if (m.id === excludeModId) return;
+    var o = el("option",null,{text:m.name || "(sin nombre)"}); o.value = m.id;
+    sel.appendChild(o);
+  });
+  sel.addEventListener("click", function(ev){ ev.stopPropagation(); });
+  sel.addEventListener("change", function(){
+    var v = sel.value;
+    if (v) onSelect(v);
+  });
+  return sel;
+}
+
+var openActMenu = null;
+function closeActMenu(){
+  if (openActMenu){ openActMenu.remove(); openActMenu = null; }
+}
+document.addEventListener("click", function(){ closeActMenu(); });
+
+// Menú "⋮" por actividad: subir, bajar, mover a otro módulo, convertir en módulo propio.
+function buildActivityMenu(mod, act){
+  var wrap = el("div","actmenu");
+  var toggle = el("button","icobtn",{text:"⋮", title:"Reordenar / mover / convertir"});
+  var panel = el("div","actmenu-panel");
+  panel.style.display = "none";
+  toggle.addEventListener("click", function(ev){
+    ev.stopPropagation();
+    var willOpen = panel.style.display === "none";
+    closeActMenu();
+    if (willOpen){ panel.style.display = "flex"; openActMenu = panel; }
+  });
+  panel.addEventListener("click", function(ev){ ev.stopPropagation(); });
+
+  var idx = mod.activities.indexOf(act);
+  var upBtn = el("button","actmenu-item",{text:"▲ Subir"});
+  upBtn.disabled = (idx <= 0);
+  upBtn.addEventListener("click", function(){ moveActivityUpDown(mod.id, act.id, -1); closeActMenu(); });
+  panel.appendChild(upBtn);
+
+  var downBtn = el("button","actmenu-item",{text:"▼ Bajar"});
+  downBtn.disabled = (idx >= mod.activities.length-1);
+  downBtn.addEventListener("click", function(){ moveActivityUpDown(mod.id, act.id, 1); closeActMenu(); });
+  panel.appendChild(downBtn);
+
+  if (state.modules.length > 1){
+    var moveSel = buildModuleTargetSelect(mod.id, "Mover a módulo…", function(targetId){
+      moveActivityToModule(act.id, targetId); closeActMenu();
+    });
+    moveSel.className += " actmenu-item";
+    panel.appendChild(moveSel);
+  }
+
+  var convBtn = el("button","actmenu-item",{text:"⇥ Convertir en módulo propio"});
+  convBtn.addEventListener("click", function(){ convertActivityToModule(act.id); closeActMenu(); });
+  panel.appendChild(convBtn);
+
+  wrap.appendChild(toggle);
+  wrap.appendChild(panel);
+  return wrap;
+}
+
 function el(tag, cls, attrs){
   var e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -547,8 +698,133 @@ function computeViolations(){
   return { violated: violated, badActs: badActs };
 }
 
+// ---- ruta crítica ----
+// Todo el cálculo se hace en "días" (semana*7) para usar el mismo delay (en días)
+// que ya usan las dependencias en computeViolations().
+var critPathMode = ""; // ""=ninguna | "cpm"=duración+dependencias | "actual"=cronograma actual+dependencias
+
+function buildDepGraph(){
+  var succ = {}, pred = {};
+  state.deps.forEach(function(d){
+    var f = findActivity(d.from), t = findActivity(d.to);
+    if (!f || !t) return;
+    (succ[d.from] = succ[d.from] || []).push({ to: d.to, type: d.type, delay: d.delay||0 });
+    (pred[d.to] = pred[d.to] || []).push({ from: d.from, type: d.type, delay: d.delay||0 });
+  });
+  return { succ: succ, pred: pred };
+}
+
+// Orden topológico (Kahn) sobre el subconjunto nodeIds. Devuelve null si hay un ciclo.
+function topoSort(nodeIds, succ){
+  var inDeg = {};
+  nodeIds.forEach(function(id){ inDeg[id] = 0; });
+  nodeIds.forEach(function(id){
+    (succ[id]||[]).forEach(function(e){ if (inDeg.hasOwnProperty(e.to)) inDeg[e.to]++; });
+  });
+  var queue = nodeIds.filter(function(id){ return inDeg[id] === 0; });
+  var order = [];
+  while (queue.length){
+    var id = queue.shift();
+    order.push(id);
+    (succ[id]||[]).forEach(function(e){
+      if (!inDeg.hasOwnProperty(e.to)) return;
+      inDeg[e.to]--;
+      if (inDeg[e.to] === 0) queue.push(e.to);
+    });
+  }
+  if (order.length !== nodeIds.length) return null;
+  return order;
+}
+
+// mode: "cpm" (duración de cada actividad + dependencias, ignorando en qué semana
+// quedó puesta) o "actual" (las semanas ya asignadas en el Gantt + dependencias,
+// para saber qué actividades no tienen ningún margen dado el cronograma actual).
+function computeCriticalPath(mode){
+  var graph = buildDepGraph();
+  var nodeIds = [], dur = {}, actualES = {}, actualEF = {};
+  state.modules.forEach(function(m){
+    m.activities.forEach(function(a){
+      if (a.start === null || a.end === null) return;
+      nodeIds.push(a.id);
+      dur[a.id] = (a.end - a.start + 1) * 7;
+      actualES[a.id] = a.start * 7;
+      actualEF[a.id] = (a.end + 1) * 7;
+    });
+  });
+  if (!nodeIds.length) return { critical: {}, projectDurationWeeks: 0, count: 0, ok: true };
+
+  var order = topoSort(nodeIds, graph.succ);
+  if (!order){
+    return { critical: {}, projectDurationWeeks: null, count: 0, ok: false,
+      error: "Hay un ciclo en las dependencias — no se puede calcular la ruta crítica." };
+  }
+
+  var ES = {}, EF = {};
+  if (mode === "cpm"){
+    order.forEach(function(id){
+      var es = 0;
+      (graph.pred[id]||[]).forEach(function(e){
+        if (dur[e.from] === undefined) return; // predecesor sin semanas asignadas: se ignora ese vínculo
+        var pEF = EF[e.from], pES = ES[e.from];
+        if (e.type === "SS") es = Math.max(es, pES + e.delay);
+        else if (e.type === "FF") es = Math.max(es, pEF + e.delay - dur[id]);
+        else es = Math.max(es, pEF + e.delay); // FS
+      });
+      ES[id] = es;
+      EF[id] = es + dur[id];
+    });
+  } else {
+    order.forEach(function(id){ ES[id] = actualES[id]; EF[id] = actualEF[id]; });
+  }
+
+  var projectFinish = 0;
+  order.forEach(function(id){ if (EF[id] > projectFinish) projectFinish = EF[id]; });
+
+  var LF = {}, LS = {};
+  for (var i=order.length-1; i>=0; i--){
+    var id = order[i];
+    var succs = graph.succ[id] || [];
+    if (!succs.length){
+      LF[id] = projectFinish;
+    } else {
+      var lf = Infinity;
+      succs.forEach(function(e){
+        if (LS[e.to] === undefined) return; // sucesor sin semanas asignadas: se ignora ese vínculo
+        if (e.type === "SS") lf = Math.min(lf, LS[e.to] - e.delay + dur[id]);
+        else if (e.type === "FF") lf = Math.min(lf, LF[e.to] - e.delay);
+        else lf = Math.min(lf, LS[e.to] - e.delay); // FS
+      });
+      LF[id] = (lf === Infinity) ? projectFinish : lf;
+    }
+    LS[id] = LF[id] - dur[id];
+  }
+
+  var critical = {}, count = 0;
+  order.forEach(function(id){
+    var slack = LS[id] - ES[id];
+    if (slack <= 0.001){ critical[id] = true; count++; }
+  });
+
+  return { critical: critical, projectDurationWeeks: projectFinish/7, count: count, ok: true };
+}
+
 function render(){
   var vio = computeViolations();
+  var crit = critPathMode ? computeCriticalPath(critPathMode) : null;
+  var critInfoEl = document.getElementById("critPathInfo");
+  if (critInfoEl){
+    if (!crit){
+      critInfoEl.className = "critpathinfo";
+      critInfoEl.textContent = "";
+    } else if (!crit.ok){
+      critInfoEl.className = "critpathinfo criterror";
+      critInfoEl.textContent = "⚠ " + crit.error;
+    } else {
+      critInfoEl.className = "critpathinfo";
+      critInfoEl.textContent = crit.count + " actividad" + (crit.count===1?"":"es") + " crítica" + (crit.count===1?"":"s") +
+        " — duración " + (critPathMode==="cpm" ? "teórica" : "actual") + ": " + crit.projectDurationWeeks + " semana" + (crit.projectDurationWeeks===1?"":"s");
+    }
+  }
   var grid = document.getElementById("grid");
   grid.innerHTML = "";
 
@@ -610,6 +886,13 @@ function render(){
       save(); render();
     }; }(m));
     mlabel.appendChild(addA);
+    if (m.activities.length === 1 && state.modules.length > 1){
+      var convModSel = buildModuleTargetSelect(m.id, "Convertir en actividad de…", function(targetId){
+        convertModuleToActivityIn(m.id, targetId);
+      });
+      convModSel.title = "Esta actividad pasará a ser una actividad más del módulo elegido, y este módulo (que quedaría vacío) se eliminará.";
+      mlabel.appendChild(convModSel);
+    }
     var delM = el("button","icobtn",{text:"✕", title:"Eliminar módulo"});
     delM.addEventListener("click", function(mm){ return function(ev){
       ev.stopPropagation();
@@ -650,6 +933,7 @@ function render(){
       alabel.appendChild(an);
       var dl = durationLabel(a);
       if (dl) alabel.appendChild(el("span","durbadge",{text: dl}));
+      alabel.appendChild(buildActivityMenu(m, a));
       var delA = el("button","icobtn",{text:"✕", title:"Eliminar actividad"});
       delA.addEventListener("click", function(mm,aa){ return function(){
         if (!confirmish(delA, "eliminar actividad")) return;
@@ -665,6 +949,7 @@ function render(){
         var cell = el("div", "week" + (isFilled?" filled":""));
         if (isFilled) cell.style.setProperty("--c", m.color);
         if (isFilled && vio.badActs[a.id]) cell.classList.add("violated");
+        if (isFilled && crit && crit.ok && crit.critical[a.id]) cell.classList.add("criticalcell");
         (function(aa, ww, cellEl){
           cellEl.addEventListener("mousedown", function(ev){
             if (ev.target.classList.contains("handle")) return;
@@ -857,10 +1142,11 @@ function buildFinanceSheetHTML(){
   html += kpiRow("Costo subcontratos, suma (" + xlsEsc(mainCur) + ")", subcontractsTotal());
   html += kpiRow("HH suma por actividad", hhSum());
   html += kpiRow("HH total (usado en el proyecto)", hhTotal());
-  html += kpiRow("Valor HH ($/hora)", fin.hhRate);
+  html += kpiRow("Valor HH (" + xlsEsc(fin.hhRateCurrency||"UF") + "/hora)", fin.hhRate);
   var hhTot0 = hhTotal();
-  var hhCostTotal0 = (typeof fin.hhRate === "number" && hhTot0 !== null) ? hhTot0*fin.hhRate : null;
-  html += kpiRow("Costo HH total", hhCostTotal0);
+  var hhCostTotal0Native = (typeof fin.hhRate === "number" && hhTot0 !== null) ? hhTot0*fin.hhRate : null;
+  html += kpiRow("Costo HH total (" + xlsEsc(fin.hhRateCurrency||"UF") + ")", hhCostTotal0Native);
+  html += kpiRow("Costo HH total (" + xlsEsc(mainCur) + ")", convertedTotal(hhCostTotal0Native, fin.hhRateCurrency));
   var cf0 = cashflowByWeek();
   var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
   var egrT0 = cf0 ? cf0.egrAcum[cf0.egrAcum.length-1] : null;
@@ -1297,6 +1583,18 @@ function renderDeps(vio){
     tr.appendChild(tdEstado);
 
     var tdActions = el("td","actioncell");
+    var naturalOrder = !depSortKey && !filterText && !filterEstado;
+    if (naturalOrder && state.deps.length > 1){
+      var depIdx = state.deps.indexOf(d);
+      var upDepBtn = el("button","icobtn",{text:"▲", title:"Subir"});
+      upDepBtn.disabled = (depIdx <= 0);
+      upDepBtn.addEventListener("click", function(){ moveArrayItem(state.deps, d, -1); save(); renderDepsOnly(); });
+      tdActions.appendChild(upDepBtn);
+      var downDepBtn = el("button","icobtn",{text:"▼", title:"Bajar"});
+      downDepBtn.disabled = (depIdx >= state.deps.length-1);
+      downDepBtn.addEventListener("click", function(){ moveArrayItem(state.deps, d, 1); save(); renderDepsOnly(); });
+      tdActions.appendChild(downDepBtn);
+    }
     var delB = el("button",null,{text:"Eliminar"});
     delB.addEventListener("click", function(){
       state.deps = state.deps.filter(function(x){ return x.id !== d.id; });
@@ -1333,8 +1631,41 @@ function fmtNum(n){
 // Valores referenciales tomados el 2026-09-07 (tipo de cambio observado ese día). Son solo
 // una sugerencia inicial para no partir de cero — no se actualizan solos, el usuario define
 // el valor real a usar en la sección "Monedas".
-var CURRENCY_RATE_HINTS = { USD: 934.6, EUR: 1085.2 };
-var CURRENCY_RATE_HINTS_DATE = "07-09-2026";
+var CURRENCY_RATE_HINTS = { USD: 957.53, EUR: 1106.59, UF: 40934.58 };
+var CURRENCY_RATE_HINTS_DATE = "15-09-2026";
+var currencyUpdateStatus = "";
+
+function pad2(n){ return (n<10?"0":"") + n; }
+
+// Intenta traer los valores del día desde mindicador.cl (API pública chilena, sin
+// llave). Nunca escribe directamente en las tasas que el usuario ya definió — solo
+// refresca la "sugerencia" que se muestra al costado. Si falla (sin red, CSP del
+// navegador/artefacto, CORS, etc.) cae en silencio y deja el último valor conocido.
+function updateCurrencyRates(){
+  var btn = document.getElementById("updateRatesBtn");
+  if (typeof fetch !== "function"){
+    currencyUpdateStatus = "⚠ Este navegador no soporta actualizar en vivo. Se mantiene el valor sugerido (" + CURRENCY_RATE_HINTS_DATE + ").";
+    renderFinance();
+    return;
+  }
+  if (btn){ btn.disabled = true; btn.textContent = "Actualizando…"; }
+  fetch("https://mindicador.cl/api")
+    .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function(data){
+      var updated = [];
+      if (data && data.uf && typeof data.uf.valor === "number"){ CURRENCY_RATE_HINTS.UF = data.uf.valor; updated.push("UF"); }
+      if (data && data.dolar && typeof data.dolar.valor === "number"){ CURRENCY_RATE_HINTS.USD = data.dolar.valor; updated.push("USD"); }
+      if (data && data.euro && typeof data.euro.valor === "number"){ CURRENCY_RATE_HINTS.EUR = data.euro.valor; updated.push("EUR"); }
+      if (!updated.length) throw new Error("respuesta sin los valores esperados");
+      var d = new Date();
+      CURRENCY_RATE_HINTS_DATE = pad2(d.getDate()) + "-" + pad2(d.getMonth()+1) + "-" + d.getFullYear();
+      currencyUpdateStatus = "✓ Sugerencias actualizadas (" + updated.join(", ") + ") al " + CURRENCY_RATE_HINTS_DATE + ".";
+    })
+    .catch(function(){
+      currencyUpdateStatus = "⚠ No se pudo actualizar en vivo (sin conexión o bloqueado). Se mantiene la última sugerencia (" + CURRENCY_RATE_HINTS_DATE + ").";
+    })
+    .then(function(){ renderFinance(); });
+}
 
 function currencyRate(code){
   if (!code) return 1;
@@ -1444,9 +1775,16 @@ function milestoneWeek(ms){
 function hhCostByWeek(){
   var n = state.weeks;
   var rate = state.finance.hhRate;
+  var currency = state.finance.hhRateCurrency;
   var cost = new Array(n);
   for (var z=0; z<n; z++) cost[z] = 0;
   if (typeof rate !== "number") return { cost: cost, any: false };
+
+  // El "Valor HH" está en su propia moneda (por defecto UF) — convertimos a la
+  // moneda principal antes de sumarlo con lo demás. Si falta la tasa, no se cuenta
+  // (mejor no incluirlo que mostrar un número equivocado).
+  var convFactor = convertedTotal(1, currency);
+  if (convFactor === null) return { cost: cost, any: false, missingRate: true };
 
   // "forma" real: horas por semana según cada actividad, sin aplicar todavía ningún total manual.
   var shape = new Array(n); for (var z2=0; z2<n; z2++) shape[z2] = 0;
@@ -1469,13 +1807,13 @@ function hhCostByWeek(){
     // Usa la distribución real por actividad (respeta dónde se concentran las horas).
     // Si además hay un total manual, sólo reescala la magnitud total — la forma no cambia.
     var scale = (typeof manual === "number" && shapeSum > 0) ? (manual/shapeSum) : 1;
-    for (var w2=0; w2<n; w2++) cost[w2] = shape[w2]*rate*scale;
+    for (var w2=0; w2<n; w2++) cost[w2] = shape[w2]*rate*scale*convFactor;
     return { cost: cost, any: true };
   }
 
   if (typeof manual === "number"){
     // Sin desglose por actividad: único dato disponible es un total plano, se reparte parejo.
-    var per = (manual*rate)/n;
+    var per = (manual*rate*convFactor)/n;
     for (var w3=0; w3<n; w3++) cost[w3] = per;
     return { cost: cost, any: true };
   }
@@ -1702,7 +2040,7 @@ function buildTotalRow(label, value, currency, onChangeValue, onChangeCurrency){
   return row;
 }
 
-function buildMilestoneRow(ms, total, currencyCode, onDelete){
+function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete){
   var tr = el("tr");
 
   var tdDesc = el("td"); var descInp = el("input"); descInp.type="text"; descInp.value=ms.desc; descInp.placeholder="Ej: Facturar 30% previo a envío";
@@ -1747,7 +2085,19 @@ function buildMilestoneRow(ms, total, currencyCode, onDelete){
   }
   tr.appendChild(tdWeek);
 
-  var tdDel = el("td","actioncell"); var delB = el("button",null,{text:"Eliminar"});
+  var tdDel = el("td","actioncell");
+  if (milestones && milestones.length > 1){
+    var msIdx = milestones.indexOf(ms);
+    var upMsBtn = el("button","icobtn",{text:"▲", title:"Subir"});
+    upMsBtn.disabled = (msIdx <= 0);
+    upMsBtn.addEventListener("click", function(){ moveArrayItem(milestones, ms, -1); save(); renderFinance(); });
+    tdDel.appendChild(upMsBtn);
+    var downMsBtn = el("button","icobtn",{text:"▼", title:"Bajar"});
+    downMsBtn.disabled = (msIdx >= milestones.length-1);
+    downMsBtn.addEventListener("click", function(){ moveArrayItem(milestones, ms, 1); save(); renderFinance(); });
+    tdDel.appendChild(downMsBtn);
+  }
+  var delB = el("button",null,{text:"Eliminar"});
   delB.addEventListener("click", onDelete);
   tdDel.appendChild(delB); tr.appendChild(tdDel);
 
@@ -1779,7 +2129,7 @@ function buildMilestonesTable(total, milestones, onAdd, emptyHint, currencyCode)
     thead.appendChild(htr); table.appendChild(thead);
     var tbody = el("tbody");
     milestones.forEach(function(ms){
-      tbody.appendChild(buildMilestoneRow(ms, total, currencyCode, function(){
+      tbody.appendChild(buildMilestoneRow(ms, total, currencyCode, milestones, function(){
         var idx = milestones.indexOf(ms);
         if (idx>=0) milestones.splice(idx,1);
         save(); renderFinance();
@@ -1827,8 +2177,10 @@ function refreshFinanceComputed(){
 
   var hhT = hhTotal();
   var rate = fin.hhRate;
-  var hhCost = (typeof rate === "number" && hhT !== null) ? hhT*rate : null;
-  setComputedCardValue("kpiCostoHHVal", hhCost, "— sin valor HH");
+  var hhCostNative = (typeof rate === "number" && hhT !== null) ? hhT*rate : null;
+  var hhCost = convertedTotal(hhCostNative, fin.hhRateCurrency);
+  var hhCostEmptyTxt = (hhCostNative !== null && hhCost === null) ? ("— falta tasa de " + (fin.hhRateCurrency||"")) : "— sin valor HH";
+  setComputedCardValue("kpiCostoHHVal", hhCost, hhCostEmptyTxt);
 
   var cfData = cashflowByWeek();
   var summary = document.getElementById("finCashSummary");
@@ -1895,17 +2247,31 @@ function renderFinance(){
     kpiRow.appendChild(hhCard);
 
     var rateCard = el("div","kpicard");
-    rateCard.appendChild(el("label",null,{text:"Valor HH ($/hora)"}));
-    var rateInp = el("input"); rateInp.type="number"; rateInp.placeholder="—";
+    rateCard.appendChild(el("label",null,{text:"Valor HH (por hora)"}));
+    var rateWrap = el("div"); rateWrap.style.display="flex"; rateWrap.style.gap="4px"; rateWrap.style.alignItems="center";
+    var rateInp = el("input"); rateInp.type="number"; rateInp.placeholder="—"; rateInp.style.flex="1 1 auto";
     rateInp.value = fin.hhRate===null?"":fin.hhRate;
     rateInp.addEventListener("change", function(ev){ var v=ev.target.value; fin.hhRate = v===""?null:parseFloat(v); save(); renderFinance(); });
-    rateCard.appendChild(rateInp);
-    rateCard.appendChild(el("div","kpihint",{text:"Si lo defines, el costo de HH se suma como línea aparte en el flujo de caja."}));
+    rateWrap.appendChild(rateInp);
+    var rateCurInp = el("input","currencyinput"); rateCurInp.type="text"; rateCurInp.maxLength=6; rateCurInp.placeholder="UF";
+    rateCurInp.value = fin.hhRateCurrency || "";
+    rateCurInp.addEventListener("change", function(ev){
+      var v = ev.target.value.trim().toUpperCase();
+      fin.hhRateCurrency = v===""?"UF":v;
+      save(); renderFinance();
+    });
+    rateWrap.appendChild(rateCurInp);
+    rateCard.appendChild(rateWrap);
+    var rateWarn = currencyWarningEl(fin.hhRateCurrency);
+    if (rateWarn) rateCard.appendChild(rateWarn);
+    rateCard.appendChild(el("div","kpihint",{text:"Por defecto en UF. Si lo defines (y hay tasa para su moneda), el costo de HH se suma como línea aparte en el flujo de caja."}));
     kpiRow.appendChild(rateCard);
 
     var hhT = hhTotal();
-    var hhCostVal = (typeof fin.hhRate === "number" && hhT !== null) ? hhT*fin.hhRate : null;
-    kpiRow.appendChild(computedCard("Costo HH total", hhCostVal, "— sin valor HH", "kpiCostoHHVal"));
+    var hhCostValNative = (typeof fin.hhRate === "number" && hhT !== null) ? hhT*fin.hhRate : null;
+    var hhCostVal = convertedTotal(hhCostValNative, fin.hhRateCurrency);
+    var hhCostEmptyTxt2 = (hhCostValNative !== null && hhCostVal === null) ? ("— falta tasa de " + (fin.hhRateCurrency||"")) : "— sin valor HH";
+    kpiRow.appendChild(computedCard("Costo HH total", hhCostVal, hhCostEmptyTxt2, "kpiCostoHHVal"));
 
     var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
     var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
@@ -1934,7 +2300,13 @@ function renderFinance(){
       save(); renderFinance();
     });
     mainRow.appendChild(mainInp);
+    var updateRatesBtn = el("button",null,{text:"🔄 Actualizar sugerencias"});
+    updateRatesBtn.id = "updateRatesBtn";
+    updateRatesBtn.title = "Trae el valor del día de UF/USD/EUR desde mindicador.cl (API pública chilena). No cambia las tasas que ya definiste, solo la columna de sugerencia.";
+    updateRatesBtn.addEventListener("click", updateCurrencyRates);
+    mainRow.appendChild(updateRatesBtn);
     curSection.appendChild(mainRow);
+    if (currencyUpdateStatus) curSection.appendChild(el("div","kpihint",{text: currencyUpdateStatus}));
 
     if (!fin.currencies.length){
       curSection.appendChild(el("div","empty",{text:"Sin monedas adicionales definidas."}));
@@ -2031,10 +2403,29 @@ function renderFinance(){
           ss.currency = v===""?null:v; save(); renderFinance();
         }; }(s));
         amtWrap.appendChild(curInp);
+        var mainCurForSub = (fin.mainCurrency || "CLP").toUpperCase();
+        var scCurNorm = (s.currency || "CLP").toUpperCase();
+        if (s.currency && scCurNorm !== mainCurForSub){
+          var scConv = convertedTotal(s.amount, s.currency);
+          if (scConv !== null){
+            amtWrap.appendChild(el("span","kpihint convertedhint",{text: "≈ " + fmtMoneyIn(scConv, mainCurForSub)}));
+          }
+        }
         var scWarn = currencyWarningEl(s.currency);
         if (scWarn) amtWrap.appendChild(scWarn);
         cardHead.appendChild(amtWrap);
 
+        if (fin.subcontracts.length > 1){
+          var subIdx = fin.subcontracts.indexOf(s);
+          var upSubBtn = el("button","icobtn",{text:"▲", title:"Subir"});
+          upSubBtn.disabled = (subIdx <= 0);
+          upSubBtn.addEventListener("click", function(){ moveArrayItem(fin.subcontracts, s, -1); save(); renderFinance(); });
+          cardHead.appendChild(upSubBtn);
+          var downSubBtn = el("button","icobtn",{text:"▼", title:"Bajar"});
+          downSubBtn.disabled = (subIdx >= fin.subcontracts.length-1);
+          downSubBtn.addEventListener("click", function(){ moveArrayItem(fin.subcontracts, s, 1); save(); renderFinance(); });
+          cardHead.appendChild(downSubBtn);
+        }
         var delSubBtn = el("button","danger",{text:"Eliminar subcontrato"});
         delSubBtn.addEventListener("click", function(ss){ return function(){
           if (!confirmish(delSubBtn, "eliminar subcontrato")) return;
@@ -2168,6 +2559,10 @@ document.getElementById("loadFileInput").addEventListener("change", function(ev)
 });
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("chooseDirBtn").addEventListener("click", chooseProjectsFolder);
+document.getElementById("critPathMode").addEventListener("change", function(ev){
+  critPathMode = ev.target.value;
+  render();
+});
 restoreDirHandle();
 updateDirIndicator();
 document.getElementById("depFilterText").addEventListener("input", renderDepsOnly);
