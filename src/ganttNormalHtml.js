@@ -248,6 +248,7 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
   <div class="legend" id="legend"></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js" integrity="sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==" crossorigin="anonymous"></script>
 <script>
 var LABEL_W = 280;
 var COL_W = 26;
@@ -1112,188 +1113,303 @@ function hexToTint(hex){
 
 function actLabel(entry){ return entry.mod.name + " — " + entry.act.name; }
 
-function xlsEsc(v){
-  v = (v===null || typeof v==="undefined") ? "" : String(v);
-  return v.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+// ---- Exportación a Excel (.xlsx real, vía ExcelJS): "Gantt" (solo carta Gantt),
+// "Financiero" (solo información financiera) y "Dependencias", como hojas separadas
+// de verdad (no el truco antiguo de HTML-como-.xls, que algunos programas no separan
+// bien en pestañas). Incluye: ancho de columna de 17px por semana, marco grueso en
+// las actividades de la ruta crítica, y línea transversal + título rotado arriba de
+// la semana para cada hito de cobro al cliente.
+function hexToArgb(hex){
+  hex = (hex||"#ffffff").replace("#","").toUpperCase();
+  if (hex.length===3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return "FF" + hex;
 }
-var TH_STYLE = "background:#1f2430;color:#ffffff;font-weight:bold;padding:4px 6px;";
-function thCell(text){ return '<td style="' + TH_STYLE + '">' + xlsEsc(text) + '</td>'; }
+function hexToTintArgb(hex){
+  var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  r = Math.round(r + (255-r)*0.85); g = Math.round(g + (255-g)*0.85); b = Math.round(b + (255-b)*0.85);
+  function h2(n){ var s=n.toString(16).toUpperCase(); return s.length<2?"0"+s:s; }
+  return "FF"+h2(r)+h2(g)+h2(b);
+}
+// Aproximación estándar de Excel (fuente Calibri 11, ancho de dígito ≈ 7px) para
+// convertir un ancho deseado en píxeles al "character width" que usa la API.
+function pxToExcelWidth(px){ return Math.round(((px-5)/7)*100)/100; }
 
-function buildGanttSheetHTML(){
-  var html = '<table border="1" cellspacing="0" cellpadding="2" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
-  html += '<tr><td colspan="3" style="font-size:14pt;font-weight:bold;border:none;">DESLOG 253795 Watts — Carta Gantt</td></tr>';
-  html += '<tr><td colspan="3" style="font-style:italic;color:#666666;border:none;">Semanas contadas desde la Orden de Compra (Semana 1 = OC)</td></tr>';
-  html += '<tr><td style="border:none;"></td></tr>';
-  html += '<tr>' + thCell("Módulo") + thCell("Actividad") + '<td style="' + TH_STYLE + 'text-align:center;">Dur. (sem)</td>';
-  for (var w=0; w<state.weeks; w++){
-    html += '<td style="' + TH_STYLE + 'text-align:center;width:16px;">' + (w+1) + '</td>';
+var XLS_HEADER_FILL = "FF1F2430";
+var XLS_HEADER_FONT = "FFFFFFFF";
+var XLS_THIN = { style:"thin", color:{argb:"FFE5E5E8"} };
+var XLS_CRIT_COLOR = "FF000000";
+var XLS_MILESTONE_COLOR = "FFDE7C00";
+var XLS_WEEK_COL_PX = 17;
+var GANTT_LABEL_COLS = 3; // Módulo, Actividad, Dur.
+
+function styleHeaderCell(cell, text){
+  cell.value = text;
+  cell.font = { bold:true, color:{argb: XLS_HEADER_FONT} };
+  cell.fill = { type:"pattern", pattern:"solid", fgColor:{argb: XLS_HEADER_FILL} };
+  cell.alignment = { horizontal:"center", vertical:"middle" };
+  cell.border = { top:XLS_THIN, left:XLS_THIN, bottom:XLS_THIN, right:XLS_THIN };
+}
+function styleThinBorder(cell){
+  cell.border = { top:XLS_THIN, left:XLS_THIN, bottom:XLS_THIN, right:XLS_THIN };
+}
+function xlsItalicNote(ws, text){
+  var r = ws.addRow([text]);
+  r.getCell(1).font = { italic:true, color:{argb:"FF999999"} };
+  return r;
+}
+
+function fillGanttSheet(ws){
+  ws.getColumn(1).width = 26;
+  ws.getColumn(2).width = 34;
+  ws.getColumn(3).width = 10;
+  for (var w=0; w<state.weeks; w++) ws.getColumn(GANTT_LABEL_COLS + 1 + w).width = pxToExcelWidth(XLS_WEEK_COL_PX);
+
+  var titleRow = ws.addRow(["DESLOG 253795 Watts — Carta Gantt"]);
+  titleRow.getCell(1).font = { bold:true, size:14 };
+  var subRow = ws.addRow(["Semanas contadas desde la Orden de Compra (Semana 1 = OC)"]);
+  subRow.getCell(1).font = { italic:true, color:{argb:"FF666666"} };
+  ws.addRow([]);
+
+  // Título del hito arriba de la semana en que cae (hitos de cobro al cliente).
+  var clientMs = state.finance.clientContract.milestones || [];
+  var msByWeek = {};
+  clientMs.forEach(function(ms){
+    var wk = milestoneWeek(ms);
+    if (wk===null || wk<0 || wk>=state.weeks) return;
+    (msByWeek[wk] = msByWeek[wk] || []).push(ms.desc || "(sin descripción)");
+  });
+  var msTitleRow = ws.addRow([]);
+  msTitleRow.height = 90;
+  for (var wt=0; wt<state.weeks; wt++){
+    if (!msByWeek[wt]) continue;
+    var cellMs = msTitleRow.getCell(GANTT_LABEL_COLS + 1 + wt);
+    cellMs.value = msByWeek[wt].join(" / ");
+    cellMs.alignment = { textRotation:90, wrapText:true, horizontal:"center", vertical:"bottom" };
+    cellMs.font = { size:8, bold:true, color:{argb: XLS_MILESTONE_COLOR} };
   }
-  html += '</tr>';
+
+  var headerRow = ws.addRow([]);
+  styleHeaderCell(headerRow.getCell(1), "Módulo");
+  styleHeaderCell(headerRow.getCell(2), "Actividad");
+  styleHeaderCell(headerRow.getCell(3), "Dur. (sem)");
+  for (var w2=0; w2<state.weeks; w2++) styleHeaderCell(headerRow.getCell(GANTT_LABEL_COLS + 1 + w2), w2+1);
+
+  // La ruta crítica del export siempre muestra algo: usa el modo elegido en pantalla,
+  // o "actual" (cronograma real + dependencias) si ahí está en "Ninguna".
+  var crit = computeCriticalPath(critPathMode || "actual");
+
+  var ganttBodyRowNums = [];
 
   state.modules.forEach(function(m){
     var span = moduleSpan(m);
-    var tint = hexToTint(m.color);
-    html += '<tr>';
-    html += '<td colspan="3" style="background:' + tint + ';font-weight:bold;">' + xlsEsc(m.name) + (span ? " (" + span.dur + " sem)" : "") + '</td>';
-    for (var w2=0; w2<state.weeks; w2++){
-      var inSpan = span && w2>=span.start && w2<=span.end;
-      html += '<td style="background:' + (inSpan?tint:"#ffffff") + ';"></td>';
+    var tintArgb = hexToTintArgb(m.color);
+    var bandRow = ws.addRow([]);
+    var bandCell = bandRow.getCell(1);
+    bandCell.value = m.name + (span ? " (" + span.dur + " sem)" : "");
+    bandCell.font = { bold:true };
+    bandCell.fill = { type:"pattern", pattern:"solid", fgColor:{argb: tintArgb} };
+    ws.mergeCells(bandRow.number, 1, bandRow.number, GANTT_LABEL_COLS);
+    for (var wb=0; wb<state.weeks; wb++){
+      var inSpan = span && wb>=span.start && wb<=span.end;
+      var bc = bandRow.getCell(GANTT_LABEL_COLS + 1 + wb);
+      bc.fill = { type:"pattern", pattern:"solid", fgColor:{argb: inSpan?tintArgb:"FFFFFFFF"} };
+      styleThinBorder(bc);
     }
-    html += '</tr>';
+    ganttBodyRowNums.push(bandRow.number);
 
     m.activities.forEach(function(a){
       var dur = durationOf(a);
-      html += '<tr><td></td><td>' + xlsEsc(a.name) + '</td><td style="text-align:center;">' + (dur===null?"":dur) + '</td>';
+      var actRow = ws.addRow(["", a.name, dur===null?"":dur]);
+      actRow.getCell(3).alignment = { horizontal:"center" };
+      var actColorArgb = hexToArgb(m.color);
+      var isCritical = crit && crit.ok && crit.critical[a.id];
       for (var w3=0; w3<state.weeks; w3++){
         var filled = a.start!==null && w3>=a.start && w3<=a.end;
-        html += '<td style="background:' + (filled?m.color:"#ffffff") + ';"></td>';
+        var fc = actRow.getCell(GANTT_LABEL_COLS + 1 + w3);
+        fc.fill = { type:"pattern", pattern:"solid", fgColor:{argb: filled?actColorArgb:"FFFFFFFF"} };
+        styleThinBorder(fc);
+        if (filled && isCritical){
+          var b = {
+            top: { style:"thick", color:{argb:XLS_CRIT_COLOR} },
+            bottom: { style:"thick", color:{argb:XLS_CRIT_COLOR} }
+          };
+          if (w3 === a.start) b.left = { style:"thick", color:{argb:XLS_CRIT_COLOR} };
+          if (w3 === a.end) b.right = { style:"thick", color:{argb:XLS_CRIT_COLOR} };
+          fc.border = Object.assign({}, fc.border, b);
+        }
       }
-      html += '</tr>';
+      ganttBodyRowNums.push(actRow.number);
     });
   });
-  html += '</table>';
-  return html;
+
+  // Línea transversal: borde izquierdo grueso en toda la columna de la semana del
+  // hito, desde el título del hito hasta la última fila de la carta Gantt.
+  var lineRowNums = [msTitleRow.number, headerRow.number].concat(ganttBodyRowNums);
+  Object.keys(msByWeek).forEach(function(wkStr){
+    var colIdx = GANTT_LABEL_COLS + 1 + parseInt(wkStr, 10);
+    lineRowNums.forEach(function(rNum){
+      var cell = ws.getRow(rNum).getCell(colIdx);
+      cell.border = Object.assign({}, cell.border, { left: { style:"thick", color:{argb: XLS_MILESTONE_COLOR} } });
+    });
+  });
+
+  ws.views = [{ state:"frozen", xSplit: GANTT_LABEL_COLS, ySplit: headerRow.number }];
 }
 
-function milestonesBlockHTML(title, total, milestones, currency){
+function addMilestoneBlock(ws, title, total, milestones, currency){
   var curTxt = (currency||"CLP").toUpperCase();
-  var out = '<tr><td colspan="7" style="font-weight:bold;font-size:12pt;border:none;">' + xlsEsc(title) + (typeof total==="number" ? (" — total: " + total + " " + curTxt) : " — (sin total definido)") + '</td></tr>';
-  out += '<tr>' + ["Descripción","%","Monto (moneda propia)","Monto (" + xlsEsc(state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento","Semana"].map(thCell).join("") + '</tr>';
+  var titleTxt = title + (typeof total==="number" ? (" — total: " + total + " " + curTxt) : " — (sin total definido)");
+  var tRow = ws.addRow([titleTxt]);
+  tRow.getCell(1).font = { bold:true, size:12 };
+  var hRow = ws.addRow([]);
+  ["Descripción","%","Monto (moneda propia)","Monto (" + (state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento","Semana"].forEach(function(h,i){
+    styleHeaderCell(hRow.getCell(i+1), h);
+  });
   if (!milestones.length){
-    out += '<tr><td colspan="7" style="color:#999999;">Sin hitos.</td></tr>';
+    xlsItalicNote(ws, "Sin hitos.");
   } else {
     milestones.forEach(function(ms){
       var amt = milestoneAmount(total, ms);
       var amtConv = milestoneAmountConverted(total, currency, ms);
       var wk = milestoneWeek(ms);
       var assocTxt = assocLabel(ms.assocKind, ms.assocId) || "(sin asociar)";
-      out += '<tr>';
-      out += '<td>' + xlsEsc(ms.desc) + '</td>';
-      out += '<td>' + (ms.pct===null?"":ms.pct+"%") + '</td>';
-      out += '<td>' + (amt===null?"":(amt + " " + curTxt)) + '</td>';
-      out += '<td>' + (amtConv===null?"":amtConv) + '</td>';
-      out += '<td>' + xlsEsc(assocTxt) + '</td>';
-      out += '<td>' + (ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "") + '</td>';
-      out += '<td>' + (wk===null?"—":("Semana " + (wk+1))) + '</td>';
-      out += '</tr>';
+      ws.addRow([
+        ms.desc,
+        ms.pct===null?"":(ms.pct+"%"),
+        amt===null?"":(amt + " " + curTxt),
+        amtConv===null?"":amtConv,
+        assocTxt,
+        ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "",
+        wk===null?"—":("Semana " + (wk+1))
+      ]);
     });
   }
-  out += '<tr><td style="border:none;"></td></tr>';
-  return out;
+  ws.addRow([]);
 }
 
-function buildFinanceSheetHTML(){
+function fillFinanceSheet(ws){
+  ws.columns = [ {width:34}, {width:18}, {width:20}, {width:20}, {width:26}, {width:12}, {width:14}, {width:16} ];
   var fin = state.finance;
-  var html = '<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
-  html += '<tr><td colspan="6" style="font-size:14pt;font-weight:bold;border:none;">Financiero</td></tr>';
-  html += '<tr><td style="border:none;"></td></tr>';
-
   var mainCur = fin.mainCurrency || "CLP";
+
+  var titleRow = ws.addRow(["Financiero"]);
+  titleRow.getCell(1).font = { bold:true, size:14 };
+  ws.addRow([]);
+
   function kpiRow(label, value){
-    return '<tr><td style="font-weight:bold;background:#f0f1f3;">' + xlsEsc(label) + '</td><td>' + (value===null||typeof value==="undefined"?"":value) + '</td><td colspan="4" style="border:none;"></td></tr>';
+    var r = ws.addRow([label, value===null||typeof value==="undefined"?"":value]);
+    r.getCell(1).font = { bold:true };
+    r.getCell(1).fill = { type:"pattern", pattern:"solid", fgColor:{argb:"FFF0F1F3"} };
   }
-  html += kpiRow("Moneda principal (totales)", mainCur);
-  html += kpiRow("Total contrato cliente (" + xlsEsc(fin.clientContract.currency||"CLP") + ")", fin.clientContract.total);
-  html += kpiRow("Total contrato cliente (" + xlsEsc(mainCur) + ")", convertedTotal(fin.clientContract.total, fin.clientContract.currency));
-  html += kpiRow("Costo materiales total (" + xlsEsc(fin.materials.currency||"CLP") + ")", fin.materials.total);
-  html += kpiRow("Costo materiales total (" + xlsEsc(mainCur) + ")", convertedTotal(fin.materials.total, fin.materials.currency));
-  html += kpiRow("Costo subcontratos, suma (" + xlsEsc(mainCur) + ")", subcontractsTotal());
-  html += kpiRow("HH suma por actividad", hhSum());
-  html += kpiRow("HH total (usado en el proyecto)", hhTotal());
-  html += kpiRow("Valor HH (" + xlsEsc(fin.hhRateCurrency||"CLP") + "/hora)", fin.hhRate);
+  kpiRow("Moneda principal (totales)", mainCur);
+  kpiRow("Total contrato cliente (" + (fin.clientContract.currency||"CLP") + ")", fin.clientContract.total);
+  kpiRow("Total contrato cliente (" + mainCur + ")", convertedTotal(fin.clientContract.total, fin.clientContract.currency));
+  kpiRow("Costo materiales total (" + (fin.materials.currency||"CLP") + ")", fin.materials.total);
+  kpiRow("Costo materiales total (" + mainCur + ")", convertedTotal(fin.materials.total, fin.materials.currency));
+  kpiRow("Costo subcontratos, suma (" + mainCur + ")", subcontractsTotal());
+  kpiRow("HH suma por actividad", hhSum());
+  kpiRow("HH total (usado en el proyecto)", hhTotal());
+  kpiRow("Valor HH (" + (fin.hhRateCurrency||"CLP") + "/hora)", fin.hhRate);
   var hhTot0 = hhTotal();
   var hhCostTotal0Native = (typeof fin.hhRate === "number" && hhTot0 !== null) ? hhTot0*fin.hhRate : null;
-  html += kpiRow("Costo HH total (" + xlsEsc(fin.hhRateCurrency||"CLP") + ")", hhCostTotal0Native);
-  html += kpiRow("Costo HH total (" + xlsEsc(mainCur) + ")", convertedTotal(hhCostTotal0Native, fin.hhRateCurrency));
+  kpiRow("Costo HH total (" + (fin.hhRateCurrency||"CLP") + ")", hhCostTotal0Native);
+  kpiRow("Costo HH total (" + mainCur + ")", convertedTotal(hhCostTotal0Native, fin.hhRateCurrency));
   var cf0 = cashflowByWeek();
   var ingT0 = cf0 ? cf0.ingAcum[cf0.ingAcum.length-1] : null;
   var egrT0 = cf0 ? cf0.egrAcum[cf0.egrAcum.length-1] : null;
-  html += kpiRow("Ingresos totales (hitos)", ingT0);
-  html += kpiRow("Egresos totales (hitos)", egrT0);
-  if (ingT0!==null || egrT0!==null) html += kpiRow("Diferencia sin HH", (ingT0||0)-(egrT0||0));
-  if (cf0 && cf0.hasHHCost) html += kpiRow("Diferencia con HH", cf0.diffWithHH[cf0.diffWithHH.length-1]);
-  html += '<tr><td style="border:none;"></td></tr>';
+  kpiRow("Ingresos totales (hitos)", ingT0);
+  kpiRow("Egresos totales (hitos)", egrT0);
+  if (ingT0!==null || egrT0!==null) kpiRow("Diferencia sin HH", (ingT0||0)-(egrT0||0));
+  if (cf0 && cf0.hasHHCost) kpiRow("Diferencia con HH", cf0.diffWithHH[cf0.diffWithHH.length-1]);
+  ws.addRow([]);
 
-  html += milestonesBlockHTML("Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones, fin.clientContract.currency);
-  html += milestonesBlockHTML("Materiales — hitos de pago", fin.materials.total, fin.materials.milestones, fin.materials.currency);
+  addMilestoneBlock(ws, "Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones, fin.clientContract.currency);
+  addMilestoneBlock(ws, "Materiales — hitos de pago", fin.materials.total, fin.materials.milestones, fin.materials.currency);
 
-  html += '<tr><td colspan="7" style="font-weight:bold;font-size:12pt;border:none;">Subcontratos</td></tr>';
+  var subTitleRow = ws.addRow(["Subcontratos"]);
+  subTitleRow.getCell(1).font = { bold:true, size:12 };
   if (!fin.subcontracts.length){
-    html += '<tr><td colspan="7" style="color:#999999;">Sin subcontratos.</td></tr>';
+    xlsItalicNote(ws, "Sin subcontratos.");
   } else {
     fin.subcontracts.forEach(function(s){
-      html += milestonesBlockHTML("Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones, s.currency);
+      addMilestoneBlock(ws, "Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones, s.currency);
     });
   }
 
   if (fin.currencies.length){
-    html += '<tr><td colspan="4" style="font-weight:bold;font-size:12pt;border:none;">Monedas (tasas de conversión respecto a CLP)</td></tr>';
-    html += '<tr>' + ["Código","Tasa (CLP por 1 unidad)"].map(thCell).join("") + '</tr>';
-    fin.currencies.forEach(function(c){
-      html += '<tr><td>' + xlsEsc(c.code) + '</td><td>' + (c.rate===null?"":c.rate) + '</td></tr>';
-    });
-    html += '<tr><td style="border:none;"></td></tr>';
+    var curTitleRow = ws.addRow(["Monedas (tasas de conversión respecto a CLP)"]);
+    curTitleRow.getCell(1).font = { bold:true, size:12 };
+    var curHeadRow = ws.addRow([]);
+    styleHeaderCell(curHeadRow.getCell(1), "Código");
+    styleHeaderCell(curHeadRow.getCell(2), "Tasa (CLP por 1 unidad)");
+    fin.currencies.forEach(function(c){ ws.addRow([c.code, c.rate===null?"":c.rate]); });
+    ws.addRow([]);
   }
 
-  html += '<tr><td colspan="3" style="font-weight:bold;font-size:12pt;border:none;">HH por actividad</td></tr>';
-  html += '<tr>' + thCell("Módulo") + thCell("Actividad") + thCell("HH") + '</tr>';
+  var hhTitleRow = ws.addRow(["HH por actividad"]);
+  hhTitleRow.getCell(1).font = { bold:true, size:12 };
+  var hhHeadRow = ws.addRow([]);
+  styleHeaderCell(hhHeadRow.getCell(1), "Módulo");
+  styleHeaderCell(hhHeadRow.getCell(2), "Actividad");
+  styleHeaderCell(hhHeadRow.getCell(3), "HH");
   var anyHH = false;
   state.modules.forEach(function(m){
     m.activities.forEach(function(a){
-      if (typeof a.hh === "number"){
-        anyHH = true;
-        html += '<tr><td>' + xlsEsc(m.name) + '</td><td>' + xlsEsc(a.name) + '</td><td>' + a.hh + '</td></tr>';
-      }
+      if (typeof a.hh === "number"){ anyHH = true; ws.addRow([m.name, a.name, a.hh]); }
     });
   });
-  if (!anyHH) html += '<tr><td colspan="3" style="color:#999999;">Sin HH cargadas por actividad.</td></tr>';
-  html += '<tr><td style="border:none;"></td></tr>';
+  if (!anyHH) xlsItalicNote(ws, "Sin HH cargadas por actividad.");
+  ws.addRow([]);
 
-  html += '<tr><td colspan="8" style="font-weight:bold;font-size:12pt;border:none;">Flujo de caja acumulado por semana</td></tr>';
+  var cfTitleRow = ws.addRow(["Flujo de caja acumulado por semana"]);
+  cfTitleRow.getCell(1).font = { bold:true, size:12 };
   var cf = cashflowByWeek();
+  var cfHeadRow = ws.addRow([]);
   if (cf && cf.hasHHCost){
-    html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Costo HH acumulado","Diferencia sin HH","Diferencia con HH"].map(thCell).join("") + '</tr>';
+    ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Costo HH acumulado","Diferencia sin HH","Diferencia con HH"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
     for (var i=0;i<state.weeks;i++){
-      html += '<tr><td>' + (i+1) + '</td><td>' + cf.ing[i] + '</td><td>' + cf.egr[i] + '</td><td>' + cf.ingAcum[i] + '</td><td>' + cf.egrAcum[i] + '</td><td>' + cf.hhAcum[i] + '</td><td>' + cf.diffNoHH[i] + '</td><td>' + cf.diffWithHH[i] + '</td></tr>';
+      ws.addRow([i+1, cf.ing[i], cf.egr[i], cf.ingAcum[i], cf.egrAcum[i], cf.hhAcum[i], cf.diffNoHH[i], cf.diffWithHH[i]]);
     }
   } else if (cf){
-    html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].map(thCell).join("") + '</tr>';
+    ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
     for (var i2=0;i2<state.weeks;i2++){
-      html += '<tr><td>' + (i2+1) + '</td><td>' + cf.ing[i2] + '</td><td>' + cf.egr[i2] + '</td><td>' + cf.ingAcum[i2] + '</td><td>' + cf.egrAcum[i2] + '</td><td>' + cf.diffNoHH[i2] + '</td></tr>';
+      ws.addRow([i2+1, cf.ing[i2], cf.egr[i2], cf.ingAcum[i2], cf.egrAcum[i2], cf.diffNoHH[i2]]);
     }
   } else {
-    html += '<tr>' + ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].map(thCell).join("") + '</tr>';
-    html += '<tr><td colspan="6" style="color:#999999;">Sin hitos con % y total definidos, ni valor HH.</td></tr>';
+    ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
+    xlsItalicNote(ws, "Sin hitos con % y total definidos, ni valor HH.");
   }
-  html += '</table>';
-  return html;
 }
 
-function buildDepsSheetHTML(){
+function fillDepsSheet(ws){
+  ws.columns = [ {width:40}, {width:26}, {width:12}, {width:40}, {width:34} ];
   var vio = computeViolations();
-  var html = '<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt;">';
-  html += '<tr><td colspan="5" style="font-size:14pt;font-weight:bold;border:none;">Dependencias</td></tr>';
-  html += '<tr><td style="border:none;"></td></tr>';
-  html += '<tr>' + ["Origen","Tipo","Delay (días)","Destino","Estado"].map(thCell).join("") + '</tr>';
+  var titleRow = ws.addRow(["Dependencias"]);
+  titleRow.getCell(1).font = { bold:true, size:14 };
+  ws.addRow([]);
+  var headRow = ws.addRow([]);
+  ["Origen","Tipo","Delay (días)","Destino","Estado"].forEach(function(h,i){ styleHeaderCell(headRow.getCell(i+1), h); });
   if (!state.deps.length){
-    html += '<tr><td colspan="5" style="color:#999999;">Sin dependencias.</td></tr>';
+    xlsItalicNote(ws, "Sin dependencias.");
   } else {
     state.deps.forEach(function(d){
       var f = findActivity(d.from), t = findActivity(d.to);
       if (!f || !t) return;
       var bad = !!vio.violated[d.id];
       var estado = bad ? ("Incumple: " + vio.violated[d.id]) : "Cumple";
-      html += '<tr' + (bad ? ' style="background:#fdf2f2;"' : '') + '>';
-      html += '<td>' + xlsEsc(f.mod.name + " › " + f.act.name) + '</td>';
-      html += '<td>' + xlsEsc(typeLabel(d.type)) + '</td>';
-      html += '<td>' + d.delay + '</td>';
-      html += '<td>' + xlsEsc(t.mod.name + " › " + t.act.name) + '</td>';
-      html += '<td' + (bad ? ' style="color:#a12c2c;font-weight:bold;"' : '') + '>' + xlsEsc(estado) + '</td>';
-      html += '</tr>';
+      var row = ws.addRow([
+        f.mod.name + " › " + f.act.name,
+        typeLabel(d.type),
+        d.delay,
+        t.mod.name + " › " + t.act.name,
+        estado
+      ]);
+      if (bad){
+        for (var c=1;c<=5;c++) row.getCell(c).fill = { type:"pattern", pattern:"solid", fgColor:{argb:"FFFDF2F2"} };
+        row.getCell(5).font = { bold:true, color:{argb:"FFA12C2C"} };
+      }
     });
   }
-  html += '</table>';
-  return html;
 }
 
 function flashBtn(btn, text, ms){
@@ -1432,19 +1548,20 @@ function writeFileSmart(data, mime, filename, ext, btn, okText){
 }
 
 function exportExcel(){
-  var sheets = [
-    { name: "Gantt", html: buildGanttSheetHTML() },
-    { name: "Financiero", html: buildFinanceSheetHTML() },
-    { name: "Dependencias", html: buildDepsSheetHTML() }
-  ];
-  var xmlSheets = sheets.map(function(s){
-    return '<x:ExcelWorksheet><x:Name>' + xlsEsc(s.name) + '</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>';
-  }).join("");
-  var doc = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">' +
-    '<head><meta charset="utf-8">' +
-    '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>' + xmlSheets + '</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
-    '</head><body>' + sheets.map(function(s){ return s.html; }).join("") + '</body></html>';
-  writeFileSmart(doc, "application/vnd.ms-excel", "DESLOG_253795_Watts_Gantt.xls", ".xls", document.getElementById("exportBtn"), "Exportado ✓");
+  var wb = new ExcelJS.Workbook();
+  wb.creator = "DESLOG 253795 Watts";
+  var wsGantt = wb.addWorksheet("Gantt");
+  var wsFin = wb.addWorksheet("Financiero");
+  var wsDeps = wb.addWorksheet("Dependencias");
+  fillGanttSheet(wsGantt);
+  fillFinanceSheet(wsFin);
+  fillDepsSheet(wsDeps);
+  var btn = document.getElementById("exportBtn");
+  wb.xlsx.writeBuffer().then(function(buffer){
+    writeFileSmart(buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DESLOG_253795_Watts_Gantt.xlsx", ".xlsx", btn, "Exportado ✓");
+  }).catch(function(e){
+    window.alert("No se pudo generar el Excel: " + (e && e.message ? e.message : e));
+  });
 }
 
 function saveToFile(){
