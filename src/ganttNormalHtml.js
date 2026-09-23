@@ -31,6 +31,9 @@ button.danger:hover{background:#fbecec;}
 .swatch{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
 .chevron{flex:0 0 auto;width:12px;font-size:10px;color:#9aa1ac;}
 .durbadge{flex:0 0 auto;font-size:10px;color:#9aa1ac;background:#f0f1f3;border-radius:4px;padding:1px 5px;white-space:nowrap;}
+.critexemptbtn{font-size:11px;}
+.critexemptbtn.active{color:var(--pr-orange);background:#fdf1e2;}
+.critexemptbtn.active:hover{color:var(--pr-orange);background:#fbe6cc;}
 .warnicon{flex:0 0 auto;color:#c0392b;font-size:12px;}
 .icobtn{flex:0 0 auto;width:18px;height:18px;border:none;background:transparent;color:#9aa1ac;cursor:pointer;font-size:13px;line-height:1;border-radius:4px;padding:0;}
 .icobtn:hover{background:#eceef1;color:#a12c2c;}
@@ -224,10 +227,12 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
       </select>
       <span class="depcount" id="depCount"></span>
     </div>
+    <div class="selbar" id="depsSelBar" style="display:none;"></div>
     <div class="deptable-wrap">
       <table class="deptable" id="depsTable">
         <thead>
           <tr>
+            <th></th>
             <th data-key="origen">Origen (módulo › actividad) <span class="sortarrow"></span></th>
             <th data-key="tipo">Tipo de restricción <span class="sortarrow"></span></th>
             <th data-key="delay">Delay <span class="sortarrow"></span></th>
@@ -308,6 +313,7 @@ function defaultState(){
   var m_sup      = mod("Supervisión del proyecto", "#B4B2A9", [
     ["Supervisión del proyecto (todo el proyecto)",0,37]
   ]);
+  m_sup.critExempt = true; // grupo especial: no entra al cálculo de ruta crítica
 
   var modules = [m_design, m_robots, m_grippers, m_entrada, m_salida, m_enfilm, m_cajas, m_seg, m_control, m_integ, m_sup];
   function findAct(mod, name){ for (var i=0;i<mod.activities.length;i++) if (mod.activities[i].name===name) return mod.activities[i].id; }
@@ -361,6 +367,10 @@ function migrate(st){
     if (typeof m.name === "undefined" || m.name === null) m.name = "Módulo sin nombre";
     if (typeof m.color === "undefined" || m.color === null) m.color = nextColor();
     if (typeof m.collapsed === "undefined") m.collapsed = false;
+    // Grupos especiales (Supervisión y similares) no entran al cálculo de ruta
+    // crítica. Los archivos antiguos no tienen este campo: se infiere por nombre
+    // solo la primera vez (si el usuario lo cambia a mano después, se respeta).
+    if (typeof m.critExempt === "undefined") m.critExempt = /supervis/i.test(m.name || "");
     if (!Array.isArray(m.activities)) m.activities = [];
     m.activities.forEach(function(a){
       if (a.cells){
@@ -629,6 +639,61 @@ function buildModuleTargetSelect(excludeModId, placeholderText, onSelect){
 var dragSrc = null; // { actId } de la actividad que se está arrastrando
 var dragDepId = null;  // id de la dependencia que se está arrastrando (tabla de Dependencias)
 var dragSubId = null;  // id del subcontrato que se está arrastrando (tarjetas de Subcontratos)
+var selectedDeps = {}; // depId -> true, selección múltiple en la tabla de Dependencias (transient)
+
+function depSelectedIds(){ return Object.keys(selectedDeps).filter(function(id){ return selectedDeps[id]; }); }
+function clearDepSelection(){ selectedDeps = {}; renderDepsOnly(); }
+// Mueve el bloque de dependencias seleccionadas una posición hacia arriba (dir<0) o
+// abajo (dir>0) dentro de state.deps, preservando el orden relativo entre ellas —
+// mismo algoritmo clásico de "mover selección" de una lista (procesa de arriba hacia
+// abajo al subir, de abajo hacia arriba al bajar, para que los ítems ya movidos no
+// se pisen entre sí).
+function moveDepsBlock(dir){
+  var ids = depSelectedIds();
+  if (!ids.length || !dir) return;
+  var idxSet = {};
+  ids.forEach(function(id){
+    var i = state.deps.findIndex(function(d){ return d.id === id; });
+    if (i >= 0) idxSet[i] = true;
+  });
+  var indices = Object.keys(idxSet).map(Number);
+  if (dir < 0){
+    indices.sort(function(a,b){ return a-b; });
+    indices.forEach(function(i){
+      if (i > 0 && !idxSet[i-1]){
+        var tmp = state.deps[i-1]; state.deps[i-1] = state.deps[i]; state.deps[i] = tmp;
+        idxSet[i-1] = true; delete idxSet[i];
+      }
+    });
+  } else {
+    indices.sort(function(a,b){ return b-a; });
+    indices.forEach(function(i){
+      if (i < state.deps.length-1 && !idxSet[i+1]){
+        var tmp2 = state.deps[i+1]; state.deps[i+1] = state.deps[i]; state.deps[i] = tmp2;
+        idxSet[i+1] = true; delete idxSet[i];
+      }
+    });
+  }
+  save(); renderDepsOnly();
+}
+function renderDepsSelBar(){
+  var bar = document.getElementById("depsSelBar");
+  if (!bar) return;
+  var ids = depSelectedIds();
+  if (!ids.length){ bar.style.display = "none"; bar.innerHTML = ""; return; }
+  bar.style.display = "flex";
+  bar.innerHTML = "";
+  bar.appendChild(el("span",null,{text: ids.length + " dependencia" + (ids.length===1?"":"s") + " seleccionada" + (ids.length===1?"":"s") + " —"}));
+  var upBtn = el("button",null,{text:"↑ Subir"});
+  upBtn.addEventListener("click", function(){ moveDepsBlock(-1); });
+  bar.appendChild(upBtn);
+  var downBtn = el("button",null,{text:"↓ Bajar"});
+  downBtn.addEventListener("click", function(){ moveDepsBlock(1); });
+  bar.appendChild(downBtn);
+  var clearBtn = el("button",null,{text:"Limpiar selección"});
+  clearBtn.addEventListener("click", clearDepSelection);
+  bar.appendChild(clearBtn);
+}
 
 // Mueve la actividad \`actId\` justo antes/después de \`refActId\`, cambiándola de
 // módulo si \`refActId\` pertenece a otro. No hace nada si son la misma actividad.
@@ -667,6 +732,11 @@ function colTemplate(){ return LABEL_W + "px repeat(" + state.weeks + ", " + COL
 
 function durationOf(a){ return (a.start===null || a.end===null) ? null : (a.end - a.start + 1); }
 function durationLabel(a){ var d = durationOf(a); return d===null ? "" : (d + (d===1?" sem":" sem")); }
+// Grupos "especiales" (p.ej. Supervisión del proyecto) que corren en paralelo a todo
+// el proyecto y no representan una secuencia real de trabajo: se excluyen del cálculo
+// de ruta crítica (nunca se marcan como críticos, y sus dependencias no afectan a las
+// demás actividades), pero se siguen mostrando normalmente en la carta Gantt.
+function isCritExemptModule(m){ return !!m.critExempt; }
 function moduleSpan(m){
   var mn=null, mx=null;
   m.activities.forEach(function(a){
@@ -749,6 +819,7 @@ function computeCriticalPath(mode){
   var graph = buildDepGraph();
   var nodeIds = [], dur = {}, actualES = {}, actualEF = {};
   state.modules.forEach(function(m){
+    if (isCritExemptModule(m)) return; // grupo especial (p.ej. Supervisión): no entra al cálculo
     m.activities.forEach(function(a){
       if (a.start === null || a.end === null) return;
       nodeIds.push(a.id);
@@ -905,6 +976,18 @@ function render(){
     nameInp.addEventListener("change", function(mm){ return function(ev){ mm.name = ev.target.value; save(); }; }(m));
     mlabel.appendChild(nameInp);
     if (span) mlabel.appendChild(el("span","durbadge",{text: span.dur + " sem"}));
+    var exemptBtn = el("button","icobtn critexemptbtn" + (m.critExempt ? " active" : ""), {
+      text: "⛔",
+      title: m.critExempt
+        ? "Grupo especial: no se considera en el cálculo de ruta crítica (corre en paralelo a todo el proyecto, no es una secuencia real de trabajo). Click para volver a incluirlo."
+        : "Marcar como grupo especial (como Supervisión): se excluye del cálculo de ruta crítica."
+    });
+    exemptBtn.addEventListener("click", function(mm){ return function(ev){
+      ev.stopPropagation();
+      mm.critExempt = !mm.critExempt;
+      save(); render();
+    }; }(m));
+    mlabel.appendChild(exemptBtn);
     var addA = el("button","icobtn add",{text:"+", title:"Agregar actividad"});
     addA.addEventListener("click", function(mm){ return function(ev){
       ev.stopPropagation();
@@ -1704,11 +1787,16 @@ function renderDeps(vio){
   var countEl = document.getElementById("depCount");
   tbody.innerHTML = "";
 
+  // limpia de la selección cualquier dependencia que ya no exista (eliminada)
+  var depIdsNow = {}; state.deps.forEach(function(d){ depIdsNow[d.id] = true; });
+  Object.keys(selectedDeps).forEach(function(id){ if (!depIdsNow[id]) delete selectedDeps[id]; });
+
   if (!state.deps.length){
     table.style.display = "none";
     emptyDiv.style.display = "block";
     emptyDiv.textContent = "Sin dependencias todavía. Usa el formulario de arriba para agregar una.";
     countEl.textContent = "";
+    renderDepsSelBar();
     return;
   }
   table.style.display = "";
@@ -1759,10 +1847,23 @@ function renderDeps(vio){
     emptyDiv.style.display = "none";
   }
 
+  var naturalOrderAll = !depSortKey && !filterText && !filterEstado;
+
   filtered.forEach(function(r){
     var d = r.d;
-    var tr = el("tr", r.isBad ? "violated" : "");
+    var tr = el("tr", (r.isBad ? "violated" : "") + (selectedDeps[d.id] ? " selectedrow" : ""));
     tr.dataset.depId = d.id;
+
+    var tdSel = el("td");
+    if (naturalOrderAll){
+      var selChk = el("input","selchk"); selChk.type = "checkbox"; selChk.checked = !!selectedDeps[d.id];
+      selChk.addEventListener("change", function(dd){ return function(ev){
+        if (ev.target.checked) selectedDeps[dd.id] = true; else delete selectedDeps[dd.id];
+        renderDepsOnly();
+      }; }(d));
+      tdSel.appendChild(selChk);
+    }
+    tr.appendChild(tdSel);
 
     var tdOrigen = el("td");
     var fromSel = el("select"); fillActivitySelect(fromSel, d.from);
@@ -1840,6 +1941,8 @@ function renderDeps(vio){
 
     tbody.appendChild(tr);
   });
+
+  renderDepsSelBar();
 }
 
 function renderLegend(){
