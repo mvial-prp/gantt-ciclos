@@ -67,6 +67,11 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .hitomark{line-height:1;}
 .hitomark.hitocobro{color:#2e7d43;}
 .hitomark.hitopago{color:var(--pr-orange);}
+.row.mstitlerow{height:72px;border-bottom:1px solid #eee;}
+.mstitlecell{border-right:1px solid #f0f0f1;overflow:hidden;}
+.mstitlecell.msline{display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;}
+.mstitlecell.msline span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9px;font-weight:600;color:var(--pr-orange);white-space:nowrap;max-height:68px;overflow:hidden;text-overflow:ellipsis;cursor:help;}
+.msline{box-shadow: inset 3px 0 0 0 var(--pr-orange);}
 .handle{position:absolute;top:2px;bottom:2px;width:6px;cursor:ew-resize;background:rgba(0,0,0,0.18);border-radius:2px;}
 .handle.right{right:0;}
 .handle.left{left:0;}
@@ -829,11 +834,31 @@ function render(){
   var grid = document.getElementById("grid");
   grid.innerHTML = "";
 
+  var clientMsByWeek = collectClientMilestonesByWeek();
+  if (Object.keys(clientMsByWeek).length){
+    var msRow = el("div","row mstitlerow");
+    msRow.style.display = "grid";
+    msRow.style.gridTemplateColumns = colTemplate();
+    msRow.appendChild(el("div","label",{text:""}));
+    for (var wm=0; wm<state.weeks; wm++){
+      var hasMs = clientMsByWeek[wm];
+      var mcell = el("div","mstitlecell" + (hasMs ? " msline" : ""));
+      if (hasMs){
+        var txt = clientMsByWeek[wm].join(" / ");
+        var msSpan = el("span",null,{text:txt});
+        msSpan.title = txt;
+        mcell.appendChild(msSpan);
+      }
+      msRow.appendChild(mcell);
+    }
+    grid.appendChild(msRow);
+  }
+
   var hrow = el("div","row headerrow");
   hrow.style.display = "grid";
   hrow.style.gridTemplateColumns = colTemplate();
   hrow.appendChild(el("div","label",{text:""}));
-  for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum",{text:String(w+1)}));
+  for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum" + (clientMsByWeek[w]?" msline":""),{text:String(w+1)}));
   grid.appendChild(hrow);
 
   var allMilestones = collectAllMilestones();
@@ -845,7 +870,7 @@ function render(){
     hitosRow.style.gridTemplateColumns = colTemplate();
     hitosRow.appendChild(el("div","label",{text:""}));
     for (var wH=0; wH<state.weeks; wH++){
-      var hcell = el("div","hitoscell");
+      var hcell = el("div","hitoscell" + (clientMsByWeek[wH]?" msline":""));
       var atWeek = byWeek[wH];
       if (atWeek && atWeek.length){
         hcell.title = atWeek.map(function(m){
@@ -907,7 +932,7 @@ function render(){
     mlabel.addEventListener("click", function(mm){ return function(){ mm.collapsed = !mm.collapsed; save(); render(); }; }(m));
     mrow.appendChild(mlabel);
     for (var w2=0; w2<state.weeks; w2++){
-      var band = el("div","week");
+      var band = el("div","week" + (clientMsByWeek[w2]?" msline":""));
       if (span && w2>=span.start && w2<=span.end) band.style.setProperty("--bandc", hexToTint(m.color));
       mrow.appendChild(band);
     }
@@ -1005,7 +1030,7 @@ function render(){
 
       for (var w3=0; w3<state.weeks; w3++){
         var isFilled = a.start!==null && w3>=a.start && w3<=a.end;
-        var cell = el("div", "week" + (isFilled?" filled":""));
+        var cell = el("div", "week" + (isFilled?" filled":"") + (clientMsByWeek[w3]?" msline":""));
         if (isFilled) cell.style.setProperty("--c", m.color);
         if (isFilled && vio.badActs[a.id]) cell.classList.add("violated");
         if (isFilled && crit && crit.ok && crit.critical[a.id]) cell.classList.add("criticalcell");
@@ -1130,9 +1155,11 @@ function hexToTintArgb(hex){
   function h2(n){ var s=n.toString(16).toUpperCase(); return s.length<2?"0"+s:s; }
   return "FF"+h2(r)+h2(g)+h2(b);
 }
-// Aproximación estándar de Excel (fuente Calibri 11, ancho de dígito ≈ 7px) para
-// convertir un ancho deseado en píxeles al "character width" que usa la API.
-function pxToExcelWidth(px){ return Math.round(((px-5)/7)*100)/100; }
+// Aproximación de Excel (fuente Calibri 11, ancho de dígito ≈ 7px) para convertir
+// un ancho deseado en píxeles al "character width" que usa la API. Para columnas
+// angostas (como las de semana) la fórmula con el offset de padding (-5) se queda
+// corta frente al resultado real en Excel, así que se usa la razón simple px/MDW.
+function pxToExcelWidth(px){ return Math.round((px/7)*100)/100; }
 
 var XLS_HEADER_FILL = "FF1F2430";
 var XLS_HEADER_FONT = "FFFFFFFF";
@@ -1159,18 +1186,20 @@ function xlsItalicNote(ws, text){
 }
 
 function fillGanttSheet(ws){
-  ws.getColumn(1).width = 26;
+  ws.getColumn(1).width = 30;
   ws.getColumn(2).width = 34;
   ws.getColumn(3).width = 10;
   for (var w=0; w<state.weeks; w++) ws.getColumn(GANTT_LABEL_COLS + 1 + w).width = pxToExcelWidth(XLS_WEEK_COL_PX);
 
   var titleRow = ws.addRow(["DESLOG 253795 Watts — Carta Gantt"]);
   titleRow.getCell(1).font = { bold:true, size:14 };
-  var subRow = ws.addRow(["Semanas contadas desde la Orden de Compra (Semana 1 = OC)"]);
+  var subRow = ws.addRow(["Semanas contadas desde cumplimiento de condiciones de inicio"]);
   subRow.getCell(1).font = { italic:true, color:{argb:"FF666666"} };
-  ws.addRow([]);
 
   // Título del hito arriba de la semana en que cae (hitos de cobro al cliente).
+  // Cada columna de semana se funde verticalmente en las filas 2-4 (bajo la fila del
+  // título/subtítulo) para dar espacio al texto rotado sin necesitar una fila propia
+  // muy alta ni una fila en blanco aparte.
   var clientMs = state.finance.clientContract.milestones || [];
   var msByWeek = {};
   clientMs.forEach(function(ms){
@@ -1178,15 +1207,19 @@ function fillGanttSheet(ws){
     if (wk===null || wk<0 || wk>=state.weeks) return;
     (msByWeek[wk] = msByWeek[wk] || []).push(ms.desc || "(sin descripción)");
   });
-  var msTitleRow = ws.addRow([]);
-  msTitleRow.height = 90;
+  var MS_ROW_TOP = subRow.number;       // fila 2
+  var MS_ROW_BOTTOM = MS_ROW_TOP + 2;   // fila 4
   for (var wt=0; wt<state.weeks; wt++){
-    if (!msByWeek[wt]) continue;
-    var cellMs = msTitleRow.getCell(GANTT_LABEL_COLS + 1 + wt);
-    cellMs.value = msByWeek[wt].join(" / ");
-    cellMs.alignment = { textRotation:90, wrapText:true, horizontal:"center", vertical:"bottom" };
-    cellMs.font = { size:8, bold:true, color:{argb: XLS_MILESTONE_COLOR} };
+    var colIdxMs = GANTT_LABEL_COLS + 1 + wt;
+    ws.mergeCells(MS_ROW_TOP, colIdxMs, MS_ROW_BOTTOM, colIdxMs);
+    if (msByWeek[wt]){
+      var cellMs = ws.getRow(MS_ROW_TOP).getCell(colIdxMs);
+      cellMs.value = msByWeek[wt].join(" / ");
+      cellMs.alignment = { textRotation:90, wrapText:true, horizontal:"center", vertical:"bottom" };
+      cellMs.font = { size:8, bold:true, color:{argb: XLS_MILESTONE_COLOR} };
+    }
   }
+  for (var rr=MS_ROW_TOP; rr<=MS_ROW_BOTTOM; rr++) ws.getRow(rr).height = 22;
 
   var headerRow = ws.addRow([]);
   styleHeaderCell(headerRow.getCell(1), "Módulo");
@@ -1244,7 +1277,10 @@ function fillGanttSheet(ws){
 
   // Línea transversal: borde izquierdo grueso en toda la columna de la semana del
   // hito, desde el título del hito hasta la última fila de la carta Gantt.
-  var lineRowNums = [msTitleRow.number, headerRow.number].concat(ganttBodyRowNums);
+  var lineRowNums = [];
+  for (var rr2=MS_ROW_TOP; rr2<=MS_ROW_BOTTOM; rr2++) lineRowNums.push(rr2);
+  lineRowNums.push(headerRow.number);
+  lineRowNums = lineRowNums.concat(ganttBodyRowNums);
   Object.keys(msByWeek).forEach(function(wkStr){
     var colIdx = GANTT_LABEL_COLS + 1 + parseInt(wkStr, 10);
     lineRowNums.forEach(function(rNum){
@@ -1956,10 +1992,13 @@ function collectAllMilestones(){
   return out;
 }
 function milestoneWeek(ms){
+  // Un hito asociado al FIN de una actividad/módulo se ubica en la semana
+  // SIGUIENTE a la última semana de esa actividad (o sea, al término de la
+  // semana en que termina, no al inicio de ella) — por eso +1.
   if (ms.assocKind === "activity" && ms.assocId){
     var f = findActivity(ms.assocId);
     if (!f || f.act.start === null) return null;
-    return ms.moment === "end" ? f.act.end : f.act.start;
+    return ms.moment === "end" ? (f.act.end + 1) : f.act.start;
   }
   if (ms.assocKind === "module" && ms.assocId){
     var m = null;
@@ -1967,10 +2006,22 @@ function milestoneWeek(ms){
     if (!m) return null;
     var span = moduleSpan(m);
     if (!span) return null;
-    return ms.moment === "end" ? span.end : span.start;
+    return ms.moment === "end" ? (span.end + 1) : span.start;
   }
   return (typeof ms.manualWeek === "number") ? ms.manualWeek : null;
 }
+// Hitos de cobro al cliente por semana (solo esos, no materiales/subcontratos) —
+// usados para la línea transversal y el título arriba de las semanas en la grilla.
+function collectClientMilestonesByWeek(){
+  var out = {};
+  (state.finance.clientContract.milestones||[]).forEach(function(ms){
+    var wk = milestoneWeek(ms);
+    if (wk===null || wk<0 || wk>=state.weeks) return;
+    (out[wk] = out[wk] || []).push(ms.desc || "(sin descripción)");
+  });
+  return out;
+}
+
 function hhCostByWeek(){
   var n = state.weeks;
   var rate = state.finance.hhRate;
