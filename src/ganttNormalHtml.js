@@ -268,7 +268,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "2";
+var APP_VERSION = "3";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -1279,16 +1279,22 @@ function xlsItalicNote(ws, text){
   return r;
 }
 
-// Inserta el logo de Proapsis en las filas 1-3, ubicado sobre aprox. las últimas 10
-// semanas de la carta Gantt (mismo ancho relativo cualquiera sea el total de semanas).
+// Ancho/alto reales del PNG embebido (700x346) — se usan para no deformar el logo:
+// se fija el alto a 3 filas y el ancho se calcula a partir de esta razón de aspecto.
+var PROAPSIS_LOGO_ASPECT = 700 / 346;
+
+// Inserta el logo de Proapsis en las filas 1-3 (alto fijo = 3 filas, ancho proporcional
+// para no deformarlo), ubicado sobre aprox. las últimas 10 semanas de la carta Gantt.
 function addProapsisLogoToGanttSheet(wb, ws){
   var imgId = wb.addImage({ base64: PROAPSIS_LOGO_PNG_BASE64, extension: "png" });
   var lastWeeksCount = Math.min(10, state.weeks);
   var startCol0 = GANTT_LABEL_COLS + (state.weeks - lastWeeksCount); // 0-based
-  var endCol0 = GANTT_LABEL_COLS + state.weeks; // 0-based, borde derecho tras la última semana
+  var rowHeightPx = 20; // alto de fila por defecto en Excel (15pt ≈ 20px)
+  var heightPx = rowHeightPx * 3; // ocupa las 3 filas de alto, sin deformar
+  var widthPx = heightPx * PROAPSIS_LOGO_ASPECT;
   ws.addImage(imgId, {
     tl: { col: startCol0, row: 0 },
-    br: { col: endCol0, row: 3 },
+    ext: { width: widthPx, height: heightPx },
     editAs: "oneCell"
   });
 }
