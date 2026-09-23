@@ -114,6 +114,7 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .legend span{display:inline-flex;align-items:center;gap:4px;}
 .legenddot{width:8px;height:8px;border-radius:2px;}
 .empty{color:#9aa1ac;font-size:12px;padding:6px 8px;}
+.appversion{margin-top:18px;text-align:right;font-size:10.5px;color:#c2c6cc;}
 .financebox{margin-top:16px;border:1px solid #e5e5e8;border-radius:8px;}
 .financeheader{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#f7f7f8;cursor:pointer;user-select:none;border-radius:8px 8px 0 0;}
 .financeheader h3{font-size:12px;font-weight:600;color:#1f2430;text-transform:uppercase;letter-spacing:.03em;}
@@ -178,7 +179,7 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 <body>
 <div id="wrap">
   <h1>DESLOG 253795 Watts — Carta Gantt interactiva (borrador)</h1>
-  <p class="sub">Semanas contadas desde la Orden de Compra (Semana 1 = OC). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
+  <p class="sub">Semanas contadas desde que se cumplen las condiciones de inicio (Semana 1 = cumplimiento de condiciones). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
   <div class="toolbar">
     <label>Semanas totales <input type="number" id="weeksInput" min="8" max="80" value="40"></label>
     <button id="addModuleBtn">+ Módulo</button>
@@ -256,12 +257,18 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
     <div id="financeBody" style="display:none;"></div>
   </div>
   <div class="legend" id="legend"></div>
+  <div class="appversion" id="appVersion"></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js" integrity="sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==" crossorigin="anonymous"></script>
 <script>
 var LABEL_W = 280;
 var COL_W = 26;
+
+// Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
+// vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
+// abriendo la última versión.
+var APP_VERSION = "1";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -2993,6 +3000,8 @@ document.getElementById("resetBtn").addEventListener("click", function(){
 });
 
 render();
+var appVersionEl = document.getElementById("appVersion");
+if (appVersionEl) appVersionEl.textContent = "v" + APP_VERSION;
 </script>
 </body>
 </html>
