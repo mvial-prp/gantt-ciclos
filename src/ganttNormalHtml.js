@@ -9,6 +9,9 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ari
 #wrap{padding:16px 20px 40px;max-width:100%;}
 h1{font-size:17px;font-weight:600;margin:0 0 2px;}
 .sub{color:#6b7280;font-size:12px;margin:0 0 14px;}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;}
+.topbartext{min-width:0;flex:1 1 auto;}
+.applogo{height:38px;width:auto;flex:0 0 auto;margin-top:2px;}
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;padding:10px 12px;background:#f7f7f8;border:1px solid #e5e5e8;border-radius:8px;}
 .toolbar label{font-size:12px;color:#4b5563;display:flex;align-items:center;gap:6px;}
 .toolbar input[type=number]{width:52px;padding:3px 5px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;}
@@ -24,6 +27,8 @@ button.danger:hover{background:#fbecec;}
 .row.headerrow{position:sticky;top:0;background:#fff;z-index:3;border-bottom:1px solid #ddd;}
 .label{display:flex;align-items:center;gap:4px;padding:0 6px 0 8px;border-right:1px solid #eee;background:#fff;position:sticky;left:0;z-index:2;overflow:hidden;}
 .row.headerrow .label{z-index:4;}
+.colresizehandle{position:absolute;top:0;right:0;bottom:0;width:6px;cursor:ew-resize;background:transparent;z-index:5;}
+.colresizehandle:hover, .colresizehandle:active{background:rgba(43,108,176,0.35);}
 .label input.name{border:none;background:transparent;font-size:12px;padding:2px 2px;width:100%;border-radius:4px;min-width:0;}
 .label input.name:hover, .label input.name:focus{background:#f0f1f3;outline:none;}
 .modulelabel{cursor:pointer;}
@@ -31,9 +36,10 @@ button.danger:hover{background:#fbecec;}
 .swatch{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
 .chevron{flex:0 0 auto;width:12px;font-size:10px;color:#9aa1ac;}
 .durbadge{flex:0 0 auto;font-size:10px;color:#9aa1ac;background:#f0f1f3;border-radius:4px;padding:1px 5px;white-space:nowrap;}
-.critexemptbtn{font-size:11px;}
-.critexemptbtn.active{color:var(--pr-orange);background:#fdf1e2;}
-.critexemptbtn.active:hover{color:var(--pr-orange);background:#fbe6cc;}
+.critexemptbtn{font-size:11px;opacity:0.3;filter:grayscale(1);}
+.critexemptbtn:hover{opacity:0.6;}
+.critexemptbtn.active{opacity:1;filter:none;color:var(--pr-orange);background:#fdf1e2;border-color:var(--pr-orange);box-shadow:inset 0 0 0 1px var(--pr-orange);}
+.critexemptbtn.active:hover{color:var(--pr-orange);background:#fbe6cc;opacity:1;}
 .warnicon{flex:0 0 auto;color:#c0392b;font-size:12px;}
 .icobtn{flex:0 0 auto;width:18px;height:18px;border:none;background:transparent;color:#9aa1ac;cursor:pointer;font-size:13px;line-height:1;border-radius:4px;padding:0;}
 .icobtn:hover{background:#eceef1;color:#a12c2c;}
@@ -178,8 +184,13 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 </head>
 <body>
 <div id="wrap">
-  <h1>DESLOG 253795 Watts — Carta Gantt interactiva (borrador)</h1>
-  <p class="sub">Semanas contadas desde que se cumplen las condiciones de inicio (Semana 1 = cumplimiento de condiciones). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
+  <div class="topbar">
+    <div class="topbartext">
+      <h1>DESLOG 253795 Watts — Carta Gantt interactiva (borrador)</h1>
+      <p class="sub">Semanas contadas desde que se cumplen las condiciones de inicio (Semana 1 = cumplimiento de condiciones). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
+    </div>
+    <img id="appLogo" class="applogo" alt="Proapsis">
+  </div>
   <div class="toolbar">
     <label>Semanas totales <input type="number" id="weeksInput" min="8" max="80" value="40"></label>
     <button id="addModuleBtn">+ Módulo</button>
@@ -194,7 +205,7 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
     <label>Ruta crítica
       <select id="critPathMode">
         <option value="">Ninguna</option>
-        <option value="cpm">CPM clásico (duración + dependencias)</option>
+        <option value="cpm" selected>CPM clásico (duración + dependencias)</option>
         <option value="actual">Recomendación (cronograma actual + dependencias)</option>
       </select>
     </label>
@@ -268,7 +279,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "3";
+var APP_VERSION = "4";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -504,6 +515,15 @@ try {
 } catch(e) {}
 if (!state) state = defaultState();
 state = migrate(state);
+
+// Ancho de la primera columna (Módulo/Actividad), ajustable arrastrando desde el
+// encabezado. Se guarda aparte (no es parte del proyecto) para que se recuerde entre
+// sesiones en este mismo navegador.
+var LABEL_COL_STORAGE_KEY = "deslog253795-watts-gantt-labelw";
+try {
+  var savedLabelW = parseInt(localStorage.getItem(LABEL_COL_STORAGE_KEY), 10);
+  if (!isNaN(savedLabelW) && savedLabelW >= 160 && savedLabelW <= 560) LABEL_W = savedLabelW;
+} catch(e) {}
 
 var drag = null;       // {actId, mode:'create', anchor}
 var resizeDrag = null; // {actId, side:'left'|'right'}
@@ -784,7 +804,7 @@ function computeViolations(){
 // ---- ruta crítica ----
 // Todo el cálculo se hace en "días" (semana*7) para usar el mismo delay (en días)
 // que ya usan las dependencias en computeViolations().
-var critPathMode = ""; // ""=ninguna | "cpm"=duración+dependencias | "actual"=cronograma actual+dependencias
+var critPathMode = "cpm"; // ""=ninguna | "cpm"=duración+dependencias (default) | "actual"=cronograma actual+dependencias
 
 function buildDepGraph(){
   var succ = {}, pred = {};
@@ -935,7 +955,11 @@ function render(){
   var hrow = el("div","row headerrow");
   hrow.style.display = "grid";
   hrow.style.gridTemplateColumns = colTemplate();
-  hrow.appendChild(el("div","label",{text:""}));
+  var hLabelCell = el("div","label");
+  var colResizeHandle = el("span","colresizehandle", { title:"Arrastra para ajustar el ancho de esta columna" });
+  colResizeHandle.addEventListener("mousedown", startLabelColResize);
+  hLabelCell.appendChild(colResizeHandle);
+  hrow.appendChild(hLabelCell);
   for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum" + (clientMsByWeek[w]?" msline":""),{text:String(w+1)}));
   grid.appendChild(hrow);
 
@@ -1207,7 +1231,28 @@ function renderSelBar(){
   bar.appendChild(msg);
 }
 
-document.addEventListener("mouseup", function(){ drag = null; resizeDrag = null; });
+document.addEventListener("mouseup", function(){
+  drag = null; resizeDrag = null;
+  if (labelColResize){
+    labelColResize = null;
+    try { localStorage.setItem(LABEL_COL_STORAGE_KEY, String(LABEL_W)); } catch(e) {}
+  }
+});
+
+// ---- ancho ajustable de la primera columna (Módulo/Actividad) ----
+var labelColResize = null; // {startX, startWidth}
+function startLabelColResize(ev){
+  labelColResize = { startX: ev.clientX, startWidth: LABEL_W };
+  ev.preventDefault();
+}
+document.addEventListener("mousemove", function(ev){
+  if (!labelColResize) return;
+  var dx = ev.clientX - labelColResize.startX;
+  LABEL_W = Math.max(160, Math.min(560, labelColResize.startWidth + dx));
+  var tmpl = colTemplate();
+  var rows = document.querySelectorAll("#grid .row");
+  for (var i=0; i<rows.length; i++) rows[i].style.gridTemplateColumns = tmpl;
+});
 
 var confirmState = null;
 function confirmish(btn, label){
@@ -3009,6 +3054,8 @@ document.getElementById("resetBtn").addEventListener("click", function(){
 render();
 var appVersionEl = document.getElementById("appVersion");
 if (appVersionEl) appVersionEl.textContent = "Versión " + APP_VERSION;
+var appLogoEl = document.getElementById("appLogo");
+if (appLogoEl) appLogoEl.src = "data:image/png;base64," + PROAPSIS_LOGO_PNG_BASE64;
 </script>
 </body>
 </html>
