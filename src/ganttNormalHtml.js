@@ -66,7 +66,9 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .week.filled{background:var(--c,#94a3b8);}
 .week.filled:hover{filter:brightness(0.92);}
 .week.violated{outline:2px solid #c0392b;outline-offset:-2px;}
-.week.filled.criticalcell{box-shadow: inset 0 0 0 2px #6b46c1;}
+.critdot{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:6px;height:6px;border-radius:50%;background:#c0392b;pointer-events:none;}
+.criticalrow .label{background:rgba(192,57,43,0.12);}
+.criticalrow.selectedrow .label{background:rgba(192,57,43,0.22);}
 .critpathinfo{font-size:11px;color:#6b46c1;white-space:nowrap;}
 .critpathinfo.criterror{color:#c0392b;}
 .moduleband .week{background:var(--bandc,#fff);cursor:default;}
@@ -279,7 +281,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "5";
+var APP_VERSION = "6";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -1073,7 +1075,8 @@ function render(){
 
     m.activities.forEach(function(a){
       var isSel = !!selected[a.id];
-      var arow = el("div","row" + (isSel ? " selectedrow" : ""));
+      var isCriticalAct = !!(crit && crit.ok && crit.critical[a.id]);
+      var arow = el("div","row" + (isSel ? " selectedrow" : "") + (isCriticalAct ? " criticalrow" : ""));
       arow.style.display = "grid";
       arow.style.gridTemplateColumns = colTemplate();
       var alabel = el("div","label");
@@ -1147,7 +1150,10 @@ function render(){
         var cell = el("div", "week" + (isFilled?" filled":"") + (clientMsByWeek[w3]?" msline":""));
         if (isFilled) cell.style.setProperty("--c", m.color);
         if (isFilled && vio.badActs[a.id]) cell.classList.add("violated");
-        if (isFilled && crit && crit.ok && crit.critical[a.id]) cell.classList.add("criticalcell");
+        if (isFilled && isCriticalAct){
+          cell.classList.add("criticalcell");
+          cell.appendChild(el("span","critdot"));
+        }
         (function(aa, ww, cellEl){
           cellEl.addEventListener("mousedown", function(ev){
             if (ev.target.classList.contains("handle")) return;
