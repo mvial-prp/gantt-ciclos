@@ -182,9 +182,13 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .cobroapply{font-size:11.5px;color:#4b5563;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;}
 .cobroapply input{width:56px;font-family:inherit;font-size:11.5px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px;}
 .cobroapply select{font-family:inherit;font-size:11.5px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px;}
-.cobrofx{display:block;font-size:10px;color:#6b7280;font-style:italic;font-weight:400;cursor:help;}
+.cobrocriteria{margin-top:6px;font-size:11px;color:#4b5563;}
+.cobrocrline{display:inline-block;margin:2px 10px 2px 0;font-size:11px;}
+.cobrocrline input{width:62px;font-family:inherit;font-size:11px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px;}
+.cobrocrsum{font-size:11px;color:#2e7d43;margin-top:2px;}
+.cobrocrsum.bad{color:#c0392b;font-weight:600;}
 .cobroshare{font-size:10.5px;color:#6b7280;font-weight:400;}
-.cobrosaldo{display:block;font-size:10px;color:#2e7d43;font-weight:400;cursor:help;}
+.cobrosaldo{display:block;font-size:10px;color:#2e7d43;font-weight:400;}
 .cobrosaldo.neg{color:#c0392b;}
 .cobrotable td.negtxt{color:#c0392b;}
 .cobroissue{font-size:11px;color:#c0392b;margin-top:4px;}
@@ -312,7 +316,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "12";
+var APP_VERSION = "13";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -405,6 +409,7 @@ function defaultFinance(){
     currencies: [{ code: "UF", rate: null }],
     cobroOptions: {},
     cobroSplit: {},
+    cobroCriteria: {},
     cobroUfAsClp: true,
     collapsed: true,
     sectionsCollapsed: { hh: true }
@@ -492,12 +497,13 @@ function migrate(st){
   if (typeof fin.mainCurrency === "undefined" || !fin.mainCurrency) fin.mainCurrency = "CLP";
   if (!fin.cobroOptions || typeof fin.cobroOptions !== "object" || Array.isArray(fin.cobroOptions)) fin.cobroOptions = {};
   if (!fin.cobroSplit || typeof fin.cobroSplit !== "object" || Array.isArray(fin.cobroSplit)) fin.cobroSplit = {};
+  if (!fin.cobroCriteria || typeof fin.cobroCriteria !== "object" || Array.isArray(fin.cobroCriteria)) fin.cobroCriteria = {};
   // versiones anteriores tenían 3 modos: "costs" (= repartido 0%), "prop" (= repartido 100%) y "main"
   Object.keys(fin.cobroOptions).forEach(function(k){
     var v = fin.cobroOptions[k];
     if (v === "prop"){ fin.cobroOptions[k] = "split"; if (typeof fin.cobroSplit[k] !== "number") fin.cobroSplit[k] = 100; }
     else if (v === "costs"){ fin.cobroOptions[k] = "split"; if (typeof fin.cobroSplit[k] !== "number") fin.cobroSplit[k] = 0; }
-    else if (v !== "main" && v !== "split") delete fin.cobroOptions[k];
+    else if (v !== "main" && v !== "split" && v !== "criteria") delete fin.cobroOptions[k];
   });
   if (typeof fin.cobroUfAsClp !== "boolean") fin.cobroUfAsClp = true;
   if (!Array.isArray(fin.currencies)) fin.currencies = [];
@@ -2391,13 +2397,19 @@ function cashflowByWeek(){
 // Convención de semanas: un hito en la semana W ocurre al INICIO de esa semana, por eso los pagos
 // cuentan hasta la semana W inclusive y las HH solo las semanas anteriores a W.
 var COBRO_OPTIONS = [
-  { key: "main",  label: "Todo en moneda principal" },
-  { key: "split", label: "Repartido entre monedas" }
+  { key: "main",     label: "Todo en moneda principal" },
+  { key: "split",    label: "Repartido entre monedas" },
+  { key: "criteria", label: "Por criterio" }
 ];
 function curKey(code){ return ((code||"CLP")+"").toUpperCase(); }
 function cobroOptionOf(msId){
   var o = state.finance.cobroOptions && state.finance.cobroOptions[msId];
-  return o === "main" ? "main" : "split";
+  return (o === "main" || o === "criteria") ? o : "split";
+}
+// Modo "por criterio": % del monto del hito que se cobra en cada moneda, definido por el usuario.
+function cobroCriteriaOf(msId){
+  var o = state.finance.cobroCriteria && state.finance.cobroCriteria[msId];
+  return (o && typeof o === "object") ? o : {};
 }
 // En el modo "repartido": % del margen que se reparte entre las monedas (en proporción a su gasto);
 // el resto del margen va a la moneda principal. 0% = costos en cada moneda + margen en moneda
@@ -2527,18 +2539,27 @@ function computeCobroAnalysis(){
 
     var option = cobroOptionOf(h.ms.id);
     var splitPct = cobroSplitPctOf(h.ms.id);
+    var criteria = null, criteriaSum = null;
     var cells = {};
-    cols.forEach(function(c){ cells[c] = { amount: 0, costPart: 0, marginPart: 0, credit: 0 }; });
+    cols.forEach(function(c){ cells[c] = { amount: 0, costPart: 0, marginPart: 0 }; });
     if (option === "main"){
-      // el cliente paga todo en moneda principal; el gasto en otras monedas se cubre convirtiendo desde ahí
+      // el cliente paga todo en moneda principal: no entra dinero en las otras monedas, así que sus saldos
+      // negativos (gasto aún sin cubrir en esa moneda) se mantienen
       cells[main].amount = H; cells[main].costPart = costPart[main]; cells[main].marginPart = H - costPart[main];
-      var converted = 0;
+    } else if (option === "criteria"){
+      // por criterio: el usuario fija qué % del monto del hito se cobra en cada moneda
+      criteria = cobroCriteriaOf(h.ms.id);
+      criteriaSum = 0;
       cols.forEach(function(c){
-        if (c === main) return;
-        cells[c].credit = costPart[c];
-        converted += needMain[c] * frac;
+        var pc = (typeof criteria[c] === "number" && criteria[c] > 0) ? criteria[c] : 0;
+        criteriaSum += pc;
+        var factor = convertedTotal(1, c);                 // valor de 1 unidad de la moneda en moneda principal
+        var amt = (factor && factor > 0) ? (H * pc / 100) / factor : 0;
+        cells[c].amount = amt;
+        cells[c].costPart = Math.min(amt, need[c]);
+        cells[c].marginPart = amt - cells[c].costPart;
       });
-      cells[main].credit = H - converted;
+      if (Math.abs(criteriaSum - 100) > 0.01) issues.push("Los % por moneda suman " + (Math.round(criteriaSum*100)/100) + "%: no suman 100%.");
     } else {
       // repartido: cada moneda cubre su gasto; del margen, \`splitPct\`% se reparte entre las monedas en
       // proporción a su gasto y el resto va a la moneda principal
@@ -2551,40 +2572,25 @@ function computeCobroAnalysis(){
       });
       var toMain = margin - spread;
       cells[main].amount += toMain; cells[main].marginPart += toMain;
-      cols.forEach(function(c){ cells[c].credit = cells[c].amount; });
     }
     var totalMain = 0;
     cols.forEach(function(c){
       var cell = cells[c];
       cell.mainEq = convertedTotal(cell.amount, c);
       totalMain += cell.mainEq;
-      income[c] += cell.credit;
-      cell.balance = income[c] - costsThrough(c, Wnext);          // cobros acumulados − gastos acumulados hasta el próximo hito
+      income[c] += cell.amount;
+      var bal = income[c] - costsThrough(c, Wnext);               // cobros acumulados − gastos acumulados hasta el próximo hito
+      cell.balance = Math.abs(bal) < 1e-7 ? 0 : bal;
+      cell.pending = cell.balance < 0 ? -cell.balance : 0;        // gasto de esa moneda que aún no queda cubierto
       totals.native[c] += cell.amount; totals.mainEq[c] += cell.mainEq;
     });
-    // Si una moneda extranjera queda en negativo y en la moneda principal sobra dinero (margen cobrado antes),
-    // se cubre convirtiendo desde la moneda principal: así solo queda negativo lo que de verdad no alcanza.
-    var surplusMain = cells[main].balance > 1e-7 ? cells[main].balance : 0;
-    var deficitMain = 0;
-    cols.forEach(function(c){ if (c !== main && cells[c].balance < -1e-7) deficitMain += convertedTotal(-cells[c].balance, c); });
-    if (surplusMain > 0 && deficitMain > 0){
-      var useMain = Math.min(surplusMain, deficitMain), ratio = useMain / deficitMain;
-      cols.forEach(function(c){
-        if (c === main || cells[c].balance >= -1e-7) return;
-        var cover = -cells[c].balance * ratio;
-        cells[c].fxCover = cover; cells[c].balance += cover; income[c] += cover;
-      });
-      cells[main].fxSpent = useMain; cells[main].balance -= useMain; income[main] -= useMain;
-    }
-    cols.forEach(function(c){
-      if (Math.abs(cells[c].balance) < 1e-7) cells[c].balance = 0;
-      cells[c].pending = cells[c].balance < 0 ? -cells[c].balance : 0;   // gasto de esa moneda que aún no queda cubierto
-    });
-    var rowMargin = H - periodCostMain;
+    var rowMargin = totalMain - periodCostMain;
     totals.totalMain += totalMain; totals.margin += rowMargin;
-    cols.forEach(function(c){ cells[c].share = totalMain > 0 ? (cells[c].mainEq / totalMain * 100) : null; });
+    var shareBase = H > 0 ? H : totalMain;
+    cols.forEach(function(c){ cells[c].share = shareBase > 0 ? (cells[c].mainEq / shareBase * 100) : null; });
     base.rows.push({
       ms: h.ms, id: h.ms.id, desc: h.ms.desc || "(sin descripción)", pct: h.ms.pct, week: h.week, option: option, splitPct: splitPct,
+      criteria: criteria, criteriaSum: criteriaSum, criteriaOk: criteriaSum === null ? true : Math.abs(criteriaSum - 100) <= 0.01,
       hitoMain: H, cells: cells, totalMain: totalMain, margin: rowMargin, surplus: margin,
       pctProject: (contractMain && contractMain > 0) ? (totalMain / contractMain * 100) : null,
       needMain: T, coveredFraction: frac, issues: issues
@@ -2949,6 +2955,14 @@ function refreshFinanceComputed(){
   else if (financeChart){ financeChart.destroy(); financeChart = null; }
 }
 
+// Guarda como criterio los % que cada moneda tiene HOY en el hito (valores de partida al pasar a "por criterio").
+function snapshotCobroCriteria(r, cols){
+  var fin = state.finance;
+  if (!fin.cobroCriteria) fin.cobroCriteria = {};
+  var o = {};
+  cols.forEach(function(c){ var sh = r.cells[c].share; o[c] = (typeof sh === "number" && !isNaN(sh)) ? sh : 0; });
+  fin.cobroCriteria[r.id] = o;
+}
 function fmtShare(p){
   if (p === null || typeof p === "undefined" || isNaN(p)) return "";
   var r = Math.round(p*10)/10;
@@ -2958,7 +2972,7 @@ function fmtSigned(n){ return (n < 0 ? "−" : "") + fmtNum(Math.abs(n)); }
 function buildCobroAnalysisSection(host){
   var an = computeCobroAnalysis();
   var main = an.main;
-  host.appendChild(el("div","kpihint",{text:"Cada hito de cobro intenta cubrir, en cada moneda, los gastos (materiales, subcontratos y HH) hasta el próximo hito de cobro; el último cubre lo que queda. Lo que un cobro deja sin cubrir en una moneda se arrastra al siguiente, y el margen cobrado antes cuenta como dinero disponible. El monto del hito (su % del contrato) es fijo: lo que sobra de cubrir los gastos es margen (en «repartido» puedes elegir qué parte se reparte entre las monedas; el resto va a la moneda principal), y si no alcanza, se cubre la misma fracción de cada moneda. Un hito en la semana N cuenta los pagos hasta esa semana y las HH trabajadas antes de ella."}));
+  host.appendChild(el("div","kpihint",{text:"Cada hito de cobro intenta cubrir, en cada moneda, los gastos (materiales, subcontratos y HH) hasta el próximo hito de cobro; el último cubre lo que queda. Lo que un cobro deja sin cubrir en una moneda se arrastra al siguiente, y el margen cobrado antes cuenta como dinero disponible. El monto del hito (su % del contrato) es fijo: lo que sobra de cubrir los gastos es margen (en «repartido» eliges qué parte del margen se reparte entre las monedas, el resto va a la moneda principal; en «por criterio» fijas tú el % de cada moneda), y si no alcanza, se cubre la misma fracción de cada moneda. Un hito en la semana N cuenta los pagos hasta esa semana y las HH trabajadas antes de ella."}));
   if (an.blocked.length){
     an.blocked.forEach(function(msg){ host.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
     host.appendChild(el("div","cobroissue",{text:"No se puede calcular la tabla hasta definir las tasas faltantes."}));
@@ -2982,15 +2996,18 @@ function buildCobroAnalysisSection(host){
     COBRO_OPTIONS.forEach(function(o){ var op = el("option",null,{text:o.label}); op.value = o.key; allSel.appendChild(op); });
     allSel.value = "split";
     applyBox.appendChild(allSel);
+    allSel.addEventListener("change", function(){ allPct.style.display = allPctLbl.style.display = (allSel.value === "split") ? "" : "none"; });
     var allPct = el("input"); allPct.type = "number"; allPct.min = "0"; allPct.max = "100"; allPct.step = "5"; allPct.value = "0";
     allPct.title = "% del margen que se reparte entre las monedas (solo modo «repartido»).";
     applyBox.appendChild(allPct);
-    applyBox.appendChild(document.createTextNode(" % "));
+    var allPctLbl = el("span",null,{text:" % "});
+    applyBox.appendChild(allPctLbl);
     var applyBtn = el("button",null,{text:"Aplicar"});
     applyBtn.addEventListener("click", function(){
       var fin2 = state.finance;
       var pv = parseFloat(allPct.value); if (isNaN(pv)) pv = 0; pv = Math.max(0, Math.min(100, pv));
       an.rows.forEach(function(r){
+        if (allSel.value === "criteria" && r.option !== "criteria") snapshotCobroCriteria(r, an.cols);
         fin2.cobroOptions[r.id] = allSel.value;
         if (allSel.value === "split") fin2.cobroSplit[r.id] = pv;
       });
@@ -3028,10 +3045,39 @@ function buildCobroAnalysisSection(host){
       sel.value = r.option;
       sel.addEventListener("change", function(ev){
         if (!state.finance.cobroOptions) state.finance.cobroOptions = {};
+        if (ev.target.value === "criteria" && r.option !== "criteria") snapshotCobroCriteria(r, an.cols);
         state.finance.cobroOptions[r.id] = ev.target.value;
         save(); renderFinance();
       });
       tdH.appendChild(sel);
+      if (r.option === "criteria"){
+        var crBox = el("div","cobrocriteria");
+        crBox.appendChild(el("div","cobrometa",{text:"% del monto del hito que se cobra en cada moneda:"}));
+        an.cols.forEach(function(c){
+          var line = el("label","cobrocrline");
+          line.appendChild(document.createTextNode(c + " "));
+          var ci = el("input"); ci.type = "number"; ci.min = "0"; ci.max = "100"; ci.step = "0.1";
+          var cur = (r.criteria && typeof r.criteria[c] === "number") ? r.criteria[c] : 0;
+          ci.value = String(Math.round(cur*100)/100);
+          ci.addEventListener("change", function(ev){
+            var v = parseFloat(ev.target.value);
+            if (isNaN(v) || v < 0) v = 0;
+            if (!state.finance.cobroCriteria) state.finance.cobroCriteria = {};
+            var o = {}; an.cols.forEach(function(k){ o[k] = (r.criteria && typeof r.criteria[k] === "number") ? r.criteria[k] : 0; });
+            var prev = state.finance.cobroCriteria[r.id];
+            if (prev && typeof prev === "object") Object.keys(prev).forEach(function(k){ if (typeof prev[k] === "number") o[k] = prev[k]; });
+            o[c] = v;
+            state.finance.cobroCriteria[r.id] = o;
+            save(); renderFinance();
+          });
+          line.appendChild(ci);
+          line.appendChild(document.createTextNode(" %"));
+          crBox.appendChild(line);
+        });
+        var sumTxt = Math.round(r.criteriaSum*100)/100;
+        crBox.appendChild(el("div", "cobrocrsum" + (r.criteriaOk ? "" : " bad"), {text: r.criteriaOk ? "Suma 100%" : ("⚠ Suma " + sumTxt + "%: no suma 100%")}));
+        tdH.appendChild(crBox);
+      }
       if (r.option === "split"){
         var splitRow = el("div","cobrosplitrow");
         splitRow.appendChild(document.createTextNode("Margen repartido por moneda: "));
@@ -3050,7 +3096,7 @@ function buildCobroAnalysisSection(host){
         tdH.appendChild(splitRow);
         if (!(r.surplus > 0)) tdH.appendChild(el("div","cobrometa",{text:"Este hito no deja excedente sobre los gastos: el reparto no tiene efecto."}));
       }
-      r.issues.forEach(function(msg){ tdH.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
+      r.issues.forEach(function(msg){ if (r.option === "criteria" && msg.indexOf("no suman 100%") !== -1) return; tdH.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
       tr.appendChild(tdH);
       an.cols.forEach(function(c){
         var cell = r.cells[c];
@@ -3061,8 +3107,6 @@ function buildCobroAnalysisSection(host){
           td.title = "Cubre gasto: " + fmtNum(cell.costPart) + " " + c + " · margen: " + fmtNum(cell.marginPart) + " " + c;
         } else td.appendChild(document.createTextNode("—"));
         td.appendChild(el("span", "cobrosaldo" + (cell.balance < 0 ? " neg" : ""), {text:"saldo: " + fmtSigned(cell.balance), title:"Saldo en " + c + " antes del próximo hito: cobros acumulados − gastos acumulados hasta el próximo hito de cobro."}));
-        if (cell.fxCover > 0) td.appendChild(el("span","cobrofx",{text:"+ " + fmtNum(cell.fxCover) + " convertidos desde " + main, title:"Este gasto se cubre convirtiendo dinero sobrante en " + main + " (margen cobrado antes)."}));
-        if (cell.fxSpent > 0) td.appendChild(el("span","cobrofx",{text:"− " + fmtNum(cell.fxSpent) + " usados para cubrir otras monedas", title:"Parte del saldo en " + main + " se convierte para cubrir gastos de otras monedas."}));
         tr.appendChild(td);
       });
       tr.appendChild(el("td","num strong",{text:fmtNum(r.totalMain)}));
@@ -3106,7 +3150,7 @@ function buildCobroAnalysisSection(host){
     tbl.appendChild(tf);
     wrap.appendChild(tbl);
     host.appendChild(wrap);
-    host.appendChild(el("div","kpihint",{text:"Los montos de cada celda están en la moneda de su columna; «Total en " + main + "» y «Margen» usan las tasas de la sección Monedas. El porcentaje entre paréntesis es lo que pesa cada moneda en el total de su hito. El saldo de cada celda es cobros acumulados − gastos acumulados hasta el próximo hito de cobro (si en una moneda falta y en la principal sobra, se cubre convirtiendo desde la principal); si aun así es negativo, en ese periodo los gastos van por delante de lo cobrado (descalce de caja entre cobros y pagos). Pasa el cursor sobre una celda para ver cuánto es gasto y cuánto margen."}));
+    host.appendChild(el("div","kpihint",{text:"Los montos de cada celda están en la moneda de su columna; «Total en " + main + "» y «Margen» usan las tasas de la sección Monedas. El porcentaje entre paréntesis es lo que pesa cada moneda en el total de su hito. El saldo de cada celda es cobros acumulados − gastos acumulados hasta el próximo hito de cobro; si es negativo, en esa moneda los gastos van por delante de lo cobrado (queda por cubrir en el siguiente cobro; en «todo en moneda principal» no entra dinero en las otras monedas, así que su saldo negativo se mantiene). Pasa el cursor sobre una celda para ver cuánto es gasto y cuánto margen."}));
     if (anyUnpaid) host.appendChild(el("div","cobroissue",{text:"⚠ Los hitos de cobro no alcanzan a cubrir todos los gastos del proyecto (ver «Gasto sin cubrir al final»)."}));
   }
   if (an.unresolved.length){
@@ -3133,7 +3177,7 @@ function fillCobroSheet(ws, an){
   var totalCol = 5 + nc*3;                      // "Total en moneda principal"
   var pctCol = totalCol + 1, marginCol = totalCol + 2;
   function isPctCol(colNumber){ return colNumber === 3 || colNumber === pctCol || (colNumber >= 5 && colNumber < totalCol && (colNumber - 5) % 3 === 1); }
-  function label(key, pct){ var f = COBRO_OPTIONS.filter(function(o){ return o.key === key; })[0]; var t = f ? f.label : key; return key === "split" ? (t + " (" + pct + "% del margen por moneda)") : t; }
+  function label(key, pct, r){ var f = COBRO_OPTIONS.filter(function(o){ return o.key === key; })[0]; var t = f ? f.label : key; if (key === "split") return t + " (" + pct + "% del margen por moneda)"; if (key === "criteria" && r) return t + " (" + an.cols.map(function(c){ return c + " " + Math.round(((r.criteria && r.criteria[c]) || 0)*100)/100 + "%"; }).join(" · ") + ")"; return t; }
   function styleRow(row, bold){
     row.eachCell({ includeEmpty:true }, function(cell, colNumber){
       styleThinBorder(cell);
@@ -3144,7 +3188,7 @@ function fillCobroSheet(ws, an){
     });
   }
   an.rows.forEach(function(r){
-    var vals = [r.desc, r.week + 1, typeof r.pct === "number" ? r.pct/100 : null, label(r.option, r.splitPct)];
+    var vals = [r.desc, r.week + 1, typeof r.pct === "number" ? r.pct/100 : null, label(r.option, r.splitPct, r)];
     an.cols.forEach(function(c){
       var cell = r.cells[c];
       vals.push(cell.amount, cell.share === null || cell.amount <= 0 ? null : cell.share/100, cell.balance);
