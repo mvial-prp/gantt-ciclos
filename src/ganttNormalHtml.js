@@ -161,7 +161,8 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .pctbadge.pctwarn{color:#c0392b;background:rgba(192,57,43,0.08);}
 .currencyinput{width:64px !important;text-transform:uppercase;}
 .currencywarn{font-size:10.5px;color:#c0392b;cursor:help;white-space:nowrap;}
-.cobrobar{margin:4px 0 8px;}
+.cobrobar{margin:4px 0 8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;}
+.cobroufopt{font-size:11.5px;color:#4b5563;cursor:pointer;}
 .cobrowrap{overflow-x:auto;margin-bottom:6px;}
 .cobrotable{border-collapse:collapse;font-size:12px;min-width:100%;background:#fff;}
 .cobrotable th{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:6px 8px;border-bottom:2px solid #d1d5db;text-align:left;white-space:nowrap;}
@@ -302,7 +303,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "9";
+var APP_VERSION = "10";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -394,6 +395,7 @@ function defaultFinance(){
     mainCurrency: "CLP",
     currencies: [{ code: "UF", rate: null }],
     cobroOptions: {},
+    cobroUfAsClp: true,
     collapsed: true,
     sectionsCollapsed: { hh: true }
   };
@@ -479,6 +481,7 @@ function migrate(st){
   if (typeof fin.sectionsCollapsed.hh === "undefined") fin.sectionsCollapsed.hh = true;
   if (typeof fin.mainCurrency === "undefined" || !fin.mainCurrency) fin.mainCurrency = "CLP";
   if (!fin.cobroOptions || typeof fin.cobroOptions !== "object" || Array.isArray(fin.cobroOptions)) fin.cobroOptions = {};
+  if (typeof fin.cobroUfAsClp !== "boolean") fin.cobroUfAsClp = true;
   if (!Array.isArray(fin.currencies)) fin.currencies = [];
   fin.currencies.forEach(function(c){
     if (typeof c.code === "undefined" || c.code === null) c.code = "";
@@ -2414,20 +2417,40 @@ function computeCobroAnalysis(){
   var hh = hhNativeCostByWeek();
   var hhCur = curKey(fin.hhRateCurrency);
 
+  // "Expresar UF en CLP": los gastos en UF se convierten a CLP (con la tasa de UF) y se suman a la
+  // columna CLP. No aplica si la moneda principal es la propia UF.
+  var foldUf = fin.cobroUfAsClp !== false && main !== "UF";
+  var foldBlocked = [];
+  if (foldUf){
+    var usesUf = payments.some(function(p){ return p.currency === "UF"; }) || (hh.any && hhCur === "UF");
+    var ufRate = currencyRate("UF");
+    if (usesUf && ufRate === null) foldBlocked.push("Falta la tasa de UF (sección Monedas) para expresar los gastos en CLP.");
+    else if (usesUf){
+      payments = payments.map(function(p){
+        return p.currency === "UF" ? { week: p.week, currency: "CLP", amount: p.amount * ufRate, source: p.source, desc: p.desc } : p;
+      });
+      payments.skipped = collectPaymentEvents().skipped;
+      if (hh.any && hhCur === "UF"){
+        hh = { any: true, native: hh.native.map(function(v){ return v * ufRate; }) };
+        hhCur = "CLP";
+      }
+    }
+  }
+
   // monedas con gastos + la principal (siempre es una columna)
   var curSeen = {}; curSeen[main] = true;
   payments.forEach(function(p){ curSeen[p.currency] = true; });
   if (hh.any) curSeen[hhCur] = true;
   var cols = Object.keys(curSeen).sort(function(a,b){ if (a===main) return -1; if (b===main) return 1; return a < b ? -1 : (a > b ? 1 : 0); });
 
-  var blocked = [];
+  var blocked = foldBlocked.slice();
   cols.forEach(function(c){
-    if (c !== main && convertedTotal(1, c) === null) blocked.push("Falta la tasa de " + c + " (sección Monedas).");
+    if (c !== main && !(foldUf && c === "UF") && convertedTotal(1, c) === null) blocked.push("Falta la tasa de " + c + " (sección Monedas).");
   });
   var contractMain = convertedTotal(cc.total, cc.currency);
   if (typeof cc.total === "number" && contractMain === null) blocked.push("Falta la tasa de " + curKey(cc.currency) + " para convertir el contrato a " + main + ".");
 
-  var base = { main: main, cols: cols, rows: [], unresolved: unresolved, blocked: blocked, skippedPayments: payments.skipped || 0, contractMain: contractMain,
+  var base = { main: main, foldUf: foldUf, cols: cols, rows: [], unresolved: unresolved, blocked: blocked, skippedPayments: payments.skipped || 0, contractMain: contractMain,
                totals: null, costTotals: {}, unpaid: {} };
   if (blocked.length || !resolved.length) return base;
 
@@ -2864,6 +2887,14 @@ function buildCobroAnalysisSection(host){
     host.appendChild(el("div","empty",{text:"No hay hitos de cobro con semana definida (asócialos a una actividad/módulo o dales una semana manual en «Contrato con cliente»)."}));
   } else {
     var bar = el("div","cobrobar");
+    if (main !== "UF"){
+      var ufLbl = el("label","cobroufopt");
+      var ufChk = el("input"); ufChk.type = "checkbox"; ufChk.checked = state.finance.cobroUfAsClp !== false;
+      ufChk.addEventListener("change", function(ev){ state.finance.cobroUfAsClp = !!ev.target.checked; save(); renderFinance(); });
+      ufLbl.appendChild(ufChk);
+      ufLbl.appendChild(document.createTextNode(" Expresar los gastos en UF en CLP"));
+      bar.appendChild(ufLbl);
+    }
     var dlBtn = el("button",null,{text:"⬇ Descargar tabla a Excel"});
     dlBtn.id = "exportCobroBtn";
     dlBtn.addEventListener("click", exportCobroExcel);
