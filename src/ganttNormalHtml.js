@@ -205,6 +205,13 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .fintotalrow input[type=number]{width:150px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
 .fintotalwrap{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#4b5563;white-space:nowrap;}
 .fintotalwrap input[type=number]{width:120px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
+.subbar{display:flex;gap:8px;margin-bottom:8px;}
+.subtoggle{font-size:12px;}
+.matlines td{vertical-align:middle;}
+.matlines td:first-child input{min-width:150px;}
+.matlines .assoccombo{min-width:200px;}
+.matlines input[type=number]{width:110px;}
+.matsummary{font-size:12px;margin:4px 0 6px;color:#1f2430;}
 .subcard{border:1px solid #ececec;border-left:4px solid var(--pr-orange);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;box-shadow:0 1px 4px rgba(51,63,72,0.08);}
 .subcardhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px;}
 .subcardhead input.subname{font-family:inherit;font-size:12.5px;font-weight:600;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;flex:1 1 200px;min-width:160px;}
@@ -316,7 +323,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "13";
+var APP_VERSION = "14";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -529,6 +536,7 @@ function migrate(st){
     if (typeof s.amount !== "number") s.amount = null;
     if (typeof s.currency === "undefined") s.currency = null;
     if (!Array.isArray(s.milestones)) s.milestones = [];
+    if (typeof s.collapsed !== "boolean") s.collapsed = false;
     s.milestones.forEach(migrateMilestone);
   });
 
@@ -553,6 +561,38 @@ function migrate(st){
 
   fin.clientContract.milestones.forEach(migrateMilestone);
   fin.materials.milestones.forEach(migrateMilestone);
+
+  // Materiales: ahora son líneas independientes (cada una con su actividad, moneda y monto). Los proyectos
+  // antiguos tenían un total + hitos con %: cada hito pasa a ser una línea con su monto (total × %) y la
+  // moneda del bloque. Si los % no sumaban 100% (o había total sin hitos) queda una línea "Saldo sin hito"
+  // sin actividad, para no perder ese monto del total.
+  (function(){
+    var mat = fin.materials;
+    var needs = mat.milestones.some(function(m){ return !Object.prototype.hasOwnProperty.call(m, "amount"); }) ||
+                (typeof mat.total === "number" && mat.milestones.length === 0);
+    if (!needs) return;
+    var total = (typeof mat.total === "number") ? mat.total : null;
+    var blockCur = mat.currency || null;
+    var assigned = 0;
+    mat.milestones.forEach(function(ms){
+      if (Object.prototype.hasOwnProperty.call(ms, "amount")) return;
+      if (typeof ms.pct === "number" && total !== null) ms.amount = Math.round(total * ms.pct) / 100;   // 2 decimales
+      else if (typeof ms.legacyAmount === "number") ms.amount = ms.legacyAmount;
+      else ms.amount = null;
+      if (typeof ms.amount === "number") assigned += ms.amount;
+      ms.currency = blockCur;
+      delete ms.pct; delete ms.legacyAmount;
+    });
+    if (total !== null && total - assigned > 0.5){
+      mat.milestones.push({ id: uid("ms"), desc: "Saldo sin hito (migrado)", assocKind: "activity", assocId: null, moment: "start",
+                            manualWeek: null, amount: Math.round((total - assigned) * 100) / 100, currency: blockCur });
+    }
+    mat.total = null;
+  })();
+  fin.materials.milestones.forEach(function(ms){
+    if (typeof ms.currency === "undefined") ms.currency = null;
+    if (typeof ms.amount !== "number") ms.amount = null;
+  });
 
   return st;
 }
@@ -1510,9 +1550,9 @@ function fillGanttSheet(wb, ws){
   addProapsisLogoToGanttSheet(wb, ws);
 }
 
-function addMilestoneBlock(ws, title, total, milestones, currency){
+function addMilestoneBlock(ws, title, total, milestones, currency, titleOverride){
   var curTxt = (currency||"CLP").toUpperCase();
-  var titleTxt = title + (typeof total==="number" ? (" — total: " + total + " " + curTxt) : " — (sin total definido)");
+  var titleTxt = titleOverride || (title + (typeof total==="number" ? (" — total: " + total + " " + curTxt) : " — (sin total definido)"));
   var tRow = ws.addRow([titleTxt]);
   tRow.getCell(1).font = { bold:true, size:12 };
   var hRow = ws.addRow([]);
@@ -1530,7 +1570,7 @@ function addMilestoneBlock(ws, title, total, milestones, currency){
       ws.addRow([
         ms.desc,
         ms.pct===null?"":(ms.pct+"%"),
-        amt===null?"":(amt + " " + curTxt),
+        amt===null?"":(amt + " " + (milestoneCurrency(currency, ms)||"CLP").toUpperCase()),
         amtConv===null?"":amtConv,
         assocTxt,
         ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "",
@@ -1558,8 +1598,7 @@ function fillFinanceSheet(ws){
   kpiRow("Moneda principal (totales)", mainCur);
   kpiRow("Total contrato cliente (" + (fin.clientContract.currency||"CLP") + ")", fin.clientContract.total);
   kpiRow("Total contrato cliente (" + mainCur + ")", convertedTotal(fin.clientContract.total, fin.clientContract.currency));
-  kpiRow("Costo materiales total (" + (fin.materials.currency||"CLP") + ")", fin.materials.total);
-  kpiRow("Costo materiales total (" + mainCur + ")", convertedTotal(fin.materials.total, fin.materials.currency));
+  kpiRow("Costo materiales total (" + mainCur + ")", materialsTotalMain());
   kpiRow("Costo subcontratos, suma (" + mainCur + ")", subcontractsTotal());
   kpiRow("HH suma por actividad", hhSum());
   kpiRow("HH total (usado en el proyecto)", hhTotal());
@@ -1578,7 +1617,11 @@ function fillFinanceSheet(ws){
   ws.addRow([]);
 
   addMilestoneBlock(ws, "Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones, fin.clientContract.currency);
-  addMilestoneBlock(ws, "Materiales — hitos de pago", fin.materials.total, fin.materials.milestones, fin.materials.currency);
+  (function(){
+    var mt = materialsTotalMain();
+    addMilestoneBlock(ws, "Materiales — pagos por línea", null, fin.materials.milestones, fin.materials.currency,
+      "Materiales — pagos por línea" + (mt === null ? " — (sin montos definidos)" : (" — total: " + Math.round(mt) + " " + (fin.mainCurrency||"CLP"))));
+  })();
 
   var subTitleRow = ws.addRow(["Subcontratos"]);
   subTitleRow.getCell(1).font = { bold:true, size:12 };
@@ -2202,9 +2245,23 @@ function hhTotal(){
 }
 // Egresos totales del proyecto (materiales + subcontratos) y con el costo de HH, en moneda principal.
 // Usa los totales de cada bloque (no depende de que los hitos de pago tengan semana).
+// Costo total de materiales en moneda principal: suma de las líneas (cada una en su moneda); en archivos
+// antiguos sin migrar, el total del bloque.
+function materialsTotalMain(){
+  var fin = state.finance;
+  var lines = fin.materials.milestones.filter(isLineMilestone);
+  if (!lines.length) return convertedTotal(fin.materials.total, fin.materials.currency);
+  var sum = 0, any = false;
+  lines.forEach(function(l){
+    if (typeof l.amount !== "number") return;
+    var c = convertedTotal(l.amount, l.currency);
+    if (c !== null){ sum += c; any = true; }
+  });
+  return any ? sum : null;
+}
 function egresosTotals(){
   var fin = state.finance;
-  var mat = convertedTotal(fin.materials.total, fin.materials.currency);
+  var mat = materialsTotalMain();
   var sub = subcontractsTotal();
   var sinHH = (mat === null && sub === null) ? null : ((mat||0) + (sub||0));
   var hhT = hhTotal();
@@ -2223,7 +2280,11 @@ function subcontractsTotal(){
   });
   return any ? sum : null;
 }
+// Una "línea" (materiales) trae su propio monto y moneda; un hito clásico (cliente, subcontratos) es un % de un total.
+function isLineMilestone(ms){ return !!ms && Object.prototype.hasOwnProperty.call(ms, "amount"); }
+function milestoneCurrency(blockCurrency, ms){ return isLineMilestone(ms) ? (ms.currency || null) : blockCurrency; }
 function milestoneAmount(total, ms){
+  if (isLineMilestone(ms)) return (typeof ms.amount === "number") ? ms.amount : null;
   if (typeof ms.pct === "number" && typeof total === "number") return total * ms.pct / 100;
   if (typeof ms.legacyAmount === "number") return ms.legacyAmount;
   return null;
@@ -2234,7 +2295,7 @@ function milestoneAmount(total, ms){
 function milestoneAmountConverted(total, currency, ms){
   var amt = milestoneAmount(total, ms);
   if (amt === null) return null;
-  return convertedTotal(amt, currency);
+  return convertedTotal(amt, milestoneCurrency(currency, ms));
 }
 // Every milestone (cliente/materiales/subcontratos) with a resolved week, for the
 // calendar markers row and the cashflow chart markers. Milestones without a resolved
@@ -2430,7 +2491,7 @@ function collectPaymentEvents(){
       if (amt === null) return;
       var wk = milestoneWeek(ms);
       if (wk === null || wk < 0 || wk >= n){ skipped++; return; }
-      out.push({ week: wk, currency: curKey(currency), amount: amt, source: sourceLabel, desc: ms.desc || "(sin descripción)" });
+      out.push({ week: wk, currency: curKey(milestoneCurrency(currency, ms)), amount: amt, source: sourceLabel, desc: ms.desc || "(sin descripción)" });
     });
   }
   push(state.finance.materials.milestones, state.finance.materials.total, state.finance.materials.currency, "Materiales");
@@ -2611,10 +2672,10 @@ function computeCobroAnalysis(){
 function normalizeSearch(s){
   return (s||"").toString().toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");
 }
-function buildAssocOptions(){
+function buildAssocOptions(activitiesOnly){
   var opts = [];
   state.modules.forEach(function(m){
-    opts.push({ kind:"module", id:m.id, label: m.name + " (módulo completo)", search: normalizeSearch(m.name) });
+    if (!activitiesOnly) opts.push({ kind:"module", id:m.id, label: m.name + " (módulo completo)", search: normalizeSearch(m.name) });
     m.activities.forEach(function(a){
       opts.push({ kind:"activity", id:a.id, label: m.name + " › " + a.name, search: normalizeSearch(m.name + " " + a.name) });
     });
@@ -2633,11 +2694,11 @@ function assocLabel(kind, id){
   }
   return "";
 }
-function createAssocCombo(initKind, initId, onSelect){
+function createAssocCombo(initKind, initId, onSelect, activitiesOnly){
   var kind = initKind || null, id = initId || null;
   var wrap = el("div","assoccombo");
   var input = el("input","assoccombo-input"); input.type="text"; input.autocomplete="off";
-  input.placeholder = "Buscar actividad o módulo…";
+  input.placeholder = activitiesOnly ? "Buscar actividad…" : "Buscar actividad o módulo…";
   input.value = assocLabel(kind, id);
   var clearBtn = el("button","assoccombo-clear",{text:"×", title:"Quitar asociación (usar semana manual)"});
   clearBtn.type = "button";
@@ -2656,7 +2717,7 @@ function createAssocCombo(initKind, initId, onSelect){
   function renderList(filterText){
     list.innerHTML = "";
     var q = normalizeSearch(filterText);
-    var filtered = buildAssocOptions().filter(function(o){ return !q || o.search.indexOf(q) !== -1; });
+    var filtered = buildAssocOptions(activitiesOnly).filter(function(o){ return !q || o.search.indexOf(q) !== -1; });
     if (!filtered.length){
       list.appendChild(el("div","assoccombo-empty",{text:"Sin resultados"}));
     } else {
@@ -2854,6 +2915,113 @@ function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete){
   tdDel.appendChild(delB); tr.appendChild(tdDel);
 
   return tr;
+}
+
+function newMaterialLine(){
+  return { id: uid("ms"), desc: "", assocKind: "activity", assocId: null, moment: "start", manualWeek: null, amount: null, currency: null };
+}
+// Materiales: una línea por material/pago, siempre asociada a una actividad, con su propia moneda y monto.
+function buildMaterialsTable(lines, onAdd){
+  var wrap = el("div");
+  var mainCur = (state.finance.mainCurrency || "CLP").toUpperCase();
+  if (!lines.length){
+    wrap.appendChild(el("div","empty",{text:"Sin materiales todavía."}));
+  } else {
+    var table = el("table","fintable matlines");
+    var thead = el("thead"); var htr = el("tr");
+    ["Material","Actividad","Inicio/fin","Moneda","Monto","Semana",""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
+    thead.appendChild(htr); table.appendChild(thead);
+    var tbody = el("tbody");
+    lines.forEach(function(ms){
+      var tr = el("tr");
+      var tdDesc = el("td"); var di = el("input"); di.type = "text"; di.value = ms.desc || ""; di.placeholder = "Ej: Robots, cámaras, tableros…";
+      di.addEventListener("change", function(ev){ ms.desc = ev.target.value; save(); });
+      tdDesc.appendChild(di); tr.appendChild(tdDesc);
+
+      var tdAct = el("td");
+      tdAct.appendChild(createAssocCombo(ms.assocKind, ms.assocId, function(kind, id){
+        ms.assocKind = "activity"; ms.assocId = (kind === "activity") ? id : null; ms.manualWeek = null;
+        save(); renderFinance();
+      }, true));
+      tr.appendChild(tdAct);
+
+      var tdWhen = el("td");
+      if (ms.assocKind === null && typeof ms.manualWeek === "number"){
+        // línea antigua con semana manual: se conserva hasta que se le asigne una actividad
+        var wki = el("input"); wki.type = "number"; wki.min = 1; wki.max = state.weeks; wki.value = ms.manualWeek + 1; wki.placeholder = "Semana";
+        wki.addEventListener("change", function(ev){ var v = ev.target.value; ms.manualWeek = v === "" ? null : (parseInt(v,10) - 1); save(); renderFinance(); });
+        tdWhen.appendChild(wki);
+      } else {
+        var momSel = el("select");
+        [["start","Inicio"],["end","Fin"]].forEach(function(o){ var op = el("option"); op.value = o[0]; op.textContent = o[1]; if (ms.moment === o[0]) op.selected = true; momSel.appendChild(op); });
+        momSel.addEventListener("change", function(ev){ ms.moment = ev.target.value; save(); renderFinance(); });
+        tdWhen.appendChild(momSel);
+      }
+      tr.appendChild(tdWhen);
+
+      var tdCur = el("td");
+      var ci = el("input","currencyinput"); ci.type = "text"; ci.maxLength = 6; ci.placeholder = "CLP"; ci.value = ms.currency || "";
+      ci.addEventListener("change", function(ev){ var v = ev.target.value.trim().toUpperCase(); ms.currency = v === "" ? null : v; save(); renderFinance(); });
+      tdCur.appendChild(ci);
+      var cw = currencyWarningEl(ms.currency); if (cw) tdCur.appendChild(cw);
+      tr.appendChild(tdCur);
+
+      var tdAmt = el("td");
+      var ai = el("input"); ai.type = "number"; ai.placeholder = "0"; ai.value = (typeof ms.amount === "number") ? ms.amount : "";
+      ai.addEventListener("change", function(ev){ var v = ev.target.value; ms.amount = v === "" ? null : parseFloat(v); save(); renderFinance(); });
+      tdAmt.appendChild(ai);
+      if (typeof ms.amount === "number" && curKey(ms.currency) !== mainCur){
+        var cv = convertedTotal(ms.amount, ms.currency);
+        if (cv !== null) tdAmt.appendChild(el("span","kpihint convertedhint",{text:"≈ " + fmtMoneyIn(cv, mainCur)}));
+      }
+      tr.appendChild(tdAmt);
+
+      var tdWeek = el("td");
+      var wk = milestoneWeek(ms);
+      if (wk === null && typeof ms.amount === "number"){
+        tdWeek.appendChild(el("span","weektag weekwarn",{text:"⚠ sin actividad", title:"Asocia el material a una actividad para ubicar su pago en el tiempo. Mientras tanto, este monto NO se cuenta en el flujo de caja."}));
+      } else {
+        tdWeek.appendChild(el("span","weektag",{text: wk === null ? "—" : ("Semana " + (wk+1))}));
+      }
+      tr.appendChild(tdWeek);
+
+      var tdDel = el("td","actioncell");
+      if (lines.length > 1){
+        var idx = lines.indexOf(ms);
+        var up = el("button","icobtn",{text:"▲", title:"Subir"}); up.disabled = (idx <= 0);
+        up.addEventListener("click", function(){ moveArrayItem(lines, ms, -1); save(); renderFinance(); });
+        var dn = el("button","icobtn",{text:"▼", title:"Bajar"}); dn.disabled = (idx >= lines.length - 1);
+        dn.addEventListener("click", function(){ moveArrayItem(lines, ms, 1); save(); renderFinance(); });
+        tdDel.appendChild(up); tdDel.appendChild(dn);
+      }
+      var del = el("button",null,{text:"Eliminar"});
+      del.addEventListener("click", function(){ var i = lines.indexOf(ms); if (i >= 0) lines.splice(i,1); save(); renderFinance(); });
+      tdDel.appendChild(del); tr.appendChild(tdDel);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+
+    // total y subtotales por moneda
+    var byCur = {}, order = [];
+    lines.forEach(function(l){
+      if (typeof l.amount !== "number") return;
+      var k = curKey(l.currency);
+      if (typeof byCur[k] === "undefined"){ byCur[k] = 0; order.push(k); }
+      byCur[k] += l.amount;
+    });
+    var tot = materialsTotalMain();
+    var sumRow = el("div","matsummary");
+    sumRow.appendChild(el("b",null,{text:"Total materiales: " + (tot === null ? "—" : fmtMoneyIn(tot, mainCur))}));
+    if (order.length > 1 || (order.length === 1 && order[0] !== mainCur)){
+      sumRow.appendChild(el("span","kpihint",{text:"  (" + order.map(function(k){ return fmtNum(byCur[k]) + " " + k; }).join(" · ") + ")"}));
+    }
+    wrap.appendChild(sumRow);
+  }
+  var addBtn = el("button","finaddbtn",{text:"+ Agregar material"});
+  addBtn.addEventListener("click", onAdd);
+  wrap.appendChild(addBtn);
+  return wrap;
 }
 
 function pctSumBadge(milestones){
@@ -3274,7 +3442,7 @@ function renderFinance(){
     }
 
     kpiRow.appendChild(computedCard("Total contrato cliente", convertedTotal(fin.clientContract.total, fin.clientContract.currency), "— sin definir"));
-    kpiRow.appendChild(computedCard("Costo materiales total", convertedTotal(fin.materials.total, fin.materials.currency), "— sin definir"));
+    kpiRow.appendChild(computedCard("Costo materiales total", materialsTotalMain(), "— sin definir"));
     var subTotal = subcontractsTotal();
     kpiRow.appendChild(computedCard("Costo subcontratos (suma)", subTotal, "— sin subcontratos"));
 
@@ -3409,14 +3577,13 @@ function renderFinance(){
 
   // --- Materiales ---
   var matSection = el("div","finsection");
-  var matHdr = collapsibleSectionHeader("materiales", "Materiales — hitos de pago");
+  var matHdr = collapsibleSectionHeader("materiales", "Materiales — pagos por línea");
   matSection.appendChild(matHdr.head);
   if (!matHdr.collapsed){
-    matSection.appendChild(el("div","kpihint",{text:"Define el costo total de materiales y el % que corresponde a cada pago."}));
-    matSection.appendChild(buildTotalRow("Costo materiales total:", fin.materials.total, fin.materials.currency, function(v){ fin.materials.total=v; save(); renderFinance(); }, function(c){ fin.materials.currency=c; save(); renderFinance(); }));
-    matSection.appendChild(buildMilestonesTable(fin.materials.total, fin.materials.milestones, function(){
-      fin.materials.milestones.push(newMilestone()); save(); renderFinance();
-    }, null, fin.materials.currency));
+    matSection.appendChild(el("div","kpihint",{text:"Agrega cada material en su propia línea: asócialo a la actividad en cuyo inicio o fin se paga, y define su moneda y monto."}));
+    matSection.appendChild(buildMaterialsTable(fin.materials.milestones, function(){
+      fin.materials.milestones.push(newMaterialLine()); save(); renderFinance();
+    }));
   }
   body.appendChild(matSection);
 
@@ -3429,10 +3596,20 @@ function renderFinance(){
     if (!fin.subcontracts.length){
       subSection.appendChild(el("div","empty",{text:"Sin subcontratos agregados."}));
     } else {
+      var subBar = el("div","subbar");
+      var collapseAllSub = el("button",null,{text:"▸ Contraer todos"});
+      collapseAllSub.addEventListener("click", function(){ fin.subcontracts.forEach(function(x){ x.collapsed = true; }); save(); renderFinance(); });
+      var expandAllSub = el("button",null,{text:"▾ Expandir todos"});
+      expandAllSub.addEventListener("click", function(){ fin.subcontracts.forEach(function(x){ x.collapsed = false; }); save(); renderFinance(); });
+      subBar.appendChild(collapseAllSub); subBar.appendChild(expandAllSub);
+      subSection.appendChild(subBar);
       fin.subcontracts.forEach(function(s){
         var card = el("div","subcard");
         card.dataset.subId = s.id;
         var cardHead = el("div","subcardhead");
+        var subToggle = el("button","icobtn subtoggle",{text: s.collapsed ? "▸" : "▾", title: s.collapsed ? "Expandir este subcontrato" : "Contraer este subcontrato"});
+        subToggle.addEventListener("click", function(ss){ return function(){ ss.collapsed = !ss.collapsed; save(); renderFinance(); }; }(s));
+        cardHead.appendChild(subToggle);
         var nameInp = el("input","subname"); nameInp.type="text"; nameInp.value=s.name; nameInp.placeholder="Nombre del subcontratista";
         nameInp.addEventListener("change", function(ev){ s.name=ev.target.value; save(); });
         cardHead.appendChild(nameInp);
@@ -3504,15 +3681,20 @@ function renderFinance(){
           renderFinance();
         }; }(s));
 
-        card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
-          s.milestones.push(newMilestone()); save(); renderFinance();
-        }, "Sin hitos de pago para este subcontrato todavía.", s.currency));
+        if (s.collapsed){
+          cardHead.appendChild(el("span","kpihint",{text: s.milestones.length + (s.milestones.length === 1 ? " hito de pago" : " hitos de pago")}));
+          cardHead.style.marginBottom = "0";
+        } else {
+          card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
+            s.milestones.push(newMilestone()); save(); renderFinance();
+          }, "Sin hitos de pago para este subcontrato todavía.", s.currency));
+        }
 
         subSection.appendChild(card);
       });
     }
     var addSubBtn = el("button","finaddbtn",{text:"+ Agregar subcontrato"});
-    addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, currency:null, milestones:[]}); save(); renderFinance(); });
+    addSubBtn.addEventListener("click", function(){ fin.subcontracts.push({id:uid("sc"), name:"", amount:null, currency:null, collapsed:false, milestones:[]}); save(); renderFinance(); });
     subSection.appendChild(addSubBtn);
   }
   body.appendChild(subSection);
