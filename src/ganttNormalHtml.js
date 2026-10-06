@@ -177,7 +177,10 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .cobrotable tfoot td{font-weight:600;border-top:1px solid #d1d5db;border-bottom:none;}
 .cobrotable tr.cobrosub td{font-weight:400;color:#6b7280;font-size:11.5px;border-top:none;}
 .cobrotable tr.cobrowarnrow td{color:#c0392b;font-weight:600;}
-.cobropend{display:block;font-size:10px;color:#c0392b;font-weight:400;cursor:help;}
+.cobroshare{font-size:10.5px;color:#6b7280;font-weight:400;}
+.cobrosaldo{display:block;font-size:10px;color:#2e7d43;font-weight:400;cursor:help;}
+.cobrosaldo.neg{color:#c0392b;}
+.cobrotable td.negtxt{color:#c0392b;}
 .cobroissue{font-size:11px;color:#c0392b;margin-top:4px;}
 
 .convertedhint{white-space:nowrap;font-style:italic;}
@@ -303,7 +306,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "10";
+var APP_VERSION = "11";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -2451,7 +2454,7 @@ function computeCobroAnalysis(){
   if (typeof cc.total === "number" && contractMain === null) blocked.push("Falta la tasa de " + curKey(cc.currency) + " para convertir el contrato a " + main + ".");
 
   var base = { main: main, foldUf: foldUf, cols: cols, rows: [], unresolved: unresolved, blocked: blocked, skippedPayments: payments.skipped || 0, contractMain: contractMain,
-               totals: null, costTotals: {}, unpaid: {} };
+               totals: null, costTotals: {}, unpaid: {}, finalBalance: {} };
   if (blocked.length || !resolved.length) return base;
 
   // gasto acumulado en \`cur\` hasta el inicio de la semana W (pagos hasta W inclusive, HH de semanas < W)
@@ -2464,7 +2467,8 @@ function computeCobroAnalysis(){
   function clean(x){ return x < 1e-7 ? 0 : x; }
 
   var covered = {};  // gasto ya cubierto por cobros anteriores, por moneda (nativo)
-  cols.forEach(function(c){ covered[c] = 0; });
+  var income = {};   // cobros acumulados por moneda (nativo, incluye margen)
+  cols.forEach(function(c){ covered[c] = 0; income[c] = 0; });
   var totals = { native: {}, mainEq: {}, totalMain: 0, margin: 0 };
   cols.forEach(function(c){ totals.native[c] = 0; totals.mainEq[c] = 0; });
 
@@ -2506,10 +2510,15 @@ function computeCobroAnalysis(){
       cell.mainEq = convertedTotal(cell.amount, c);
       totalMain += cell.mainEq;
       covered[c] += costPart[c];
-      cell.pending = clean(Math.max(0, costsThrough(c, Wnext) - covered[c]));   // saldo impago tras este cobro
+      income[c] += cell.amount;
+      cell.pending = clean(Math.max(0, costsThrough(c, Wnext) - covered[c]));   // gasto que este cobro no alcanza a cubrir
+      // saldo en la moneda = cobros acumulados − gastos acumulados hasta el próximo hito (negativo = falta)
+      cell.balance = income[c] - costsThrough(c, Wnext);
+      if (Math.abs(cell.balance) < 1e-7) cell.balance = 0;
       totals.native[c] += cell.amount; totals.mainEq[c] += cell.mainEq;
     });
     totals.totalMain += totalMain; totals.margin += margin;
+    cols.forEach(function(c){ cells[c].share = totalMain > 0 ? (cells[c].mainEq / totalMain * 100) : null; });
     base.rows.push({
       ms: h.ms, id: h.ms.id, desc: h.ms.desc || "(sin descripción)", pct: h.ms.pct, week: h.week, option: option,
       hitoMain: H, cells: cells, totalMain: totalMain, margin: margin,
@@ -2522,6 +2531,8 @@ function computeCobroAnalysis(){
   cols.forEach(function(c){
     base.costTotals[c] = costsThrough(c, n);
     base.unpaid[c] = clean(Math.max(0, base.costTotals[c] - covered[c]));
+    var fb = totals.native[c] - base.costTotals[c];
+    base.finalBalance[c] = Math.abs(fb) < 1e-7 ? 0 : fb;
   });
   return base;
 }
@@ -2874,6 +2885,12 @@ function refreshFinanceComputed(){
   else if (financeChart){ financeChart.destroy(); financeChart = null; }
 }
 
+function fmtShare(p){
+  if (p === null || typeof p === "undefined" || isNaN(p)) return "";
+  var r = Math.round(p*10)/10;
+  return (r % 1 === 0 ? String(r) : r.toLocaleString("es-CL")) + "%";
+}
+function fmtSigned(n){ return (n < 0 ? "−" : "") + fmtNum(Math.abs(n)); }
 function buildCobroAnalysisSection(host){
   var an = computeCobroAnalysis();
   var main = an.main;
@@ -2936,11 +2953,10 @@ function buildCobroAnalysisSection(host){
         var td = el("td","num");
         if (cell.amount > 0){
           td.appendChild(document.createTextNode(fmtNum(cell.amount)));
+          if (cell.share !== null) td.appendChild(el("span","cobroshare",{text:" (" + fmtShare(cell.share) + ")", title:"Porcentaje que representa esta moneda del total de este hito (en " + main + ")."}));
           td.title = "Cubre gasto: " + fmtNum(cell.costPart) + " " + c + " · margen: " + fmtNum(cell.marginPart) + " " + c;
         } else td.appendChild(document.createTextNode("—"));
-        if (cell.pending > 0){
-          td.appendChild(el("span","cobropend",{text:"saldo impago: " + fmtNum(cell.pending), title:"Gasto en " + c + " que este cobro no alcanza a cubrir; se suma a lo que debe cubrir el siguiente hito."}));
-        }
+        td.appendChild(el("span", "cobrosaldo" + (cell.balance < 0 ? " neg" : ""), {text:"saldo: " + fmtSigned(cell.balance), title:"Saldo en " + c + " antes del próximo hito: cobros acumulados − gastos acumulados hasta el próximo hito de cobro."}));
         tr.appendChild(td);
       });
       tr.appendChild(el("td","num strong",{text:fmtNum(r.totalMain)}));
@@ -2968,6 +2984,11 @@ function buildCobroAnalysisSection(host){
     an.cols.forEach(function(c){ trG.appendChild(el("td","num",{text:fmtNum(an.costTotals[c])})); });
     trG.appendChild(el("td")); trG.appendChild(el("td")); trG.appendChild(el("td"));
     tf.appendChild(trG);
+    var trS = el("tr","cobrosub");
+    trS.appendChild(el("td",null,{text:"Saldo final (cobrado − gasto)"}));
+    an.cols.forEach(function(c){ trS.appendChild(el("td","num" + (an.finalBalance[c] < 0 ? " negtxt" : ""),{text:fmtSigned(an.finalBalance[c])})); });
+    trS.appendChild(el("td")); trS.appendChild(el("td")); trS.appendChild(el("td"));
+    tf.appendChild(trS);
     var anyUnpaid = an.cols.some(function(c){ return an.unpaid[c] > 0; });
     if (anyUnpaid){
       var trU = el("tr","cobrosub cobrowarnrow");
@@ -2979,7 +3000,7 @@ function buildCobroAnalysisSection(host){
     tbl.appendChild(tf);
     wrap.appendChild(tbl);
     host.appendChild(wrap);
-    host.appendChild(el("div","kpihint",{text:"Los montos de cada celda están en la moneda de su columna; «Total en " + main + "» y «Margen» usan las tasas de la sección Monedas. Pasa el cursor sobre una celda para ver cuánto es gasto y cuánto margen."}));
+    host.appendChild(el("div","kpihint",{text:"Los montos de cada celda están en la moneda de su columna; «Total en " + main + "» y «Margen» usan las tasas de la sección Monedas. El porcentaje entre paréntesis es lo que pesa cada moneda en el total de su hito. El saldo de cada celda es cobros acumulados − gastos acumulados hasta el próximo hito de cobro. Pasa el cursor sobre una celda para ver cuánto es gasto y cuánto margen."}));
     if (anyUnpaid) host.appendChild(el("div","cobroissue",{text:"⚠ Los hitos de cobro no alcanzan a cubrir todos los gastos del proyecto (ver «Gasto sin cubrir al final»)."}));
   }
   if (an.unresolved.length){
@@ -2995,57 +3016,66 @@ function fillCobroSheet(ws, an){
   var main = an.main;
   var titleRow = ws.addRow([(state.projectTitle || "Proyecto sin título") + " — Cobro por moneda en hitos de cobro"]);
   titleRow.getCell(1).font = { bold:true, size:14 };
-  xlsItalicNote(ws, "Cada hito intenta cubrir, en cada moneda, los gastos hasta el próximo hito de cobro (acumulado; el saldo impago pasa al siguiente). Montos de cada columna en su moneda; totales y margen en " + main + ".");
+  xlsItalicNote(ws, "Cada hito intenta cubrir, en cada moneda, los gastos hasta el próximo hito de cobro (acumulado; el saldo impago pasa al siguiente). Montos de cada columna en su moneda; totales y margen en " + main + ". «% del hito» = peso de la moneda en el total del hito; «Saldo» = cobros acumulados − gastos acumulados hasta el próximo hito.");
   ws.addRow([]);
   var header = ["Hito de cobro", "Semana", "% del contrato", "Modo de cobro"];
-  an.cols.forEach(function(c){ header.push(c); });
+  an.cols.forEach(function(c){ header.push(c, "% " + c + " del hito", "Saldo " + c); });
   header.push("Total en " + main, "% del proyecto", "Margen en " + main);
   var hr = ws.addRow(header);
   hr.eachCell(function(cell){ styleHeaderCell(cell, cell.value); cell.alignment = { horizontal:"center", vertical:"middle", wrapText:true }; });
-  var numFmt = "#,##0";
-  var firstCol = 5, lastCurCol = 4 + an.cols.length;
+  var nc = an.cols.length;
+  var totalCol = 5 + nc*3;                      // "Total en moneda principal"
+  var pctCol = totalCol + 1, marginCol = totalCol + 2;
+  function isPctCol(colNumber){ return colNumber === 3 || colNumber === pctCol || (colNumber >= 5 && colNumber < totalCol && (colNumber - 5) % 3 === 1); }
   function label(key){ var f = COBRO_OPTIONS.filter(function(o){ return o.key === key; })[0]; return f ? f.label : key; }
-  an.rows.forEach(function(r){
-    var vals = [r.desc, r.week + 1, typeof r.pct === "number" ? r.pct/100 : null, label(r.option)];
-    an.cols.forEach(function(c){ vals.push(r.cells[c].amount); });
-    vals.push(r.totalMain, r.pctProject === null ? null : r.pctProject/100, r.margin);
-    var row = ws.addRow(vals);
+  function styleRow(row, bold){
     row.eachCell({ includeEmpty:true }, function(cell, colNumber){
       styleThinBorder(cell);
-      if (colNumber >= firstCol && colNumber !== lastCurCol + 2) cell.numFmt = numFmt;
-      if (colNumber === 3 || colNumber === lastCurCol + 2) cell.numFmt = "0.0%";
-      if (colNumber >= 2) cell.alignment = { horizontal: colNumber === 4 ? "left" : "right" };
+      if (bold !== null) cell.font = { bold: !!bold };
+      if (colNumber >= 5) cell.numFmt = isPctCol(colNumber) ? "0.0%" : "#,##0";
+      if (colNumber === 3) cell.numFmt = "0.0%";
+      cell.alignment = { horizontal: colNumber === 1 || colNumber === 4 ? "left" : "right" };
     });
-    row.getCell(lastCurCol + 1).font = { bold:true };
+  }
+  an.rows.forEach(function(r){
+    var vals = [r.desc, r.week + 1, typeof r.pct === "number" ? r.pct/100 : null, label(r.option)];
+    an.cols.forEach(function(c){
+      var cell = r.cells[c];
+      vals.push(cell.amount, cell.share === null || cell.amount <= 0 ? null : cell.share/100, cell.balance);
+    });
+    vals.push(r.totalMain, r.pctProject === null ? null : r.pctProject/100, r.margin);
+    var row = ws.addRow(vals);
+    styleRow(row, null);
+    row.getCell(totalCol).font = { bold:true };
+    an.cols.forEach(function(c, i){ if (r.cells[c].balance < 0) row.getCell(7 + i*3).font = { color:{argb:"FFC0392B"} }; });
   });
   function footer(text, valuesByCol, withTotals, bold){
     var vals = [text, null, null, null];
-    an.cols.forEach(function(c){ vals.push(valuesByCol(c)); });
+    an.cols.forEach(function(c){ vals.push(valuesByCol(c), null, null); });
     if (withTotals) vals.push(an.totals.totalMain, an.totals.pctProject === null ? null : an.totals.pctProject/100, an.totals.margin);
     else vals.push(null, null, null);
     var row = ws.addRow(vals);
-    row.eachCell({ includeEmpty:true }, function(cell, colNumber){
-      styleThinBorder(cell);
-      cell.font = { bold: !!bold };
-      if (colNumber >= firstCol) cell.numFmt = (colNumber === lastCurCol + 2) ? "0.0%" : numFmt;
-      if (colNumber >= 2) cell.alignment = { horizontal:"right" };
-    });
-    row.getCell(1).alignment = { horizontal:"left" };
+    styleRow(row, bold);
     return row;
   }
   footer("Total cobrado", function(c){ return an.totals.native[c]; }, true, true);
   footer("Equivalente en " + main, function(c){ return an.totals.mainEq[c]; }, false, false);
   footer("Gasto total del proyecto", function(c){ return an.costTotals[c]; }, false, false);
+  footer("Saldo final (cobrado − gasto)", function(c){ return an.finalBalance[c]; }, false, false);
   var anyUnpaid = an.cols.some(function(c){ return an.unpaid[c] > 0; });
   if (anyUnpaid) footer("Gasto sin cubrir al final", function(c){ return an.unpaid[c]; }, false, false);
   ws.getColumn(1).width = 34;
   ws.getColumn(2).width = 9;
   ws.getColumn(3).width = 14;
   ws.getColumn(4).width = 46;
-  for (var i=0;i<an.cols.length;i++) ws.getColumn(5+i).width = 16;
-  ws.getColumn(5+an.cols.length).width = 18;
-  ws.getColumn(6+an.cols.length).width = 15;
-  ws.getColumn(7+an.cols.length).width = 18;
+  for (var i=0;i<nc;i++){
+    ws.getColumn(5+i*3).width = 16;
+    ws.getColumn(6+i*3).width = 12;
+    ws.getColumn(7+i*3).width = 16;
+  }
+  ws.getColumn(totalCol).width = 18;
+  ws.getColumn(pctCol).width = 15;
+  ws.getColumn(marginCol).width = 18;
   ws.views = [{ state:"frozen", xSplit:1, ySplit:4 }];
 }
 function exportCobroExcel(){
