@@ -8,6 +8,9 @@ export const GANTT_NORMAL_HTML = `<!DOCTYPE html>
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1f2430;background:#fff;font-size:13px;}
 #wrap{padding:16px 20px 40px;max-width:100%;}
 h1{font-size:17px;font-weight:600;margin:0 0 2px;}
+.projtitle-input{font:inherit;font-weight:600;font-size:17px;border:1px solid transparent;background:transparent;padding:1px 4px;margin:-1px -4px;border-radius:4px;min-width:120px;max-width:60vw;}
+.projtitle-input:hover{border-color:#d1d5db;}
+.projtitle-input:focus{border-color:#378ADD;background:#fff;outline:none;}
 .sub{color:#6b7280;font-size:12px;margin:0 0 14px;}
 .topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;}
 .topbartext{min-width:0;flex:1 1 auto;}
@@ -158,6 +161,25 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .pctbadge.pctwarn{color:#c0392b;background:rgba(192,57,43,0.08);}
 .currencyinput{width:64px !important;text-transform:uppercase;}
 .currencywarn{font-size:10.5px;color:#c0392b;cursor:help;white-space:nowrap;}
+.cobrocard{border:1px solid #ececec;border-left:4px solid var(--pr-blue);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;box-shadow:0 1px 4px rgba(51,63,72,0.08);}
+.cobrohead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:6px;}
+.cobrohead .cobrotitle{font-size:12.5px;font-weight:700;color:#1f2430;}
+.cobrohead .cobrometa{font-size:11px;color:#6b7280;}
+.cobrogrid{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:flex-start;}
+.cobrogrid > div{min-width:240px;flex:1 1 240px;}
+.cobrogrid h5{margin:0 0 4px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;}
+.cobrotbl{width:100%;border-collapse:collapse;font-size:12px;}
+.cobrotbl td{padding:3px 6px;border-bottom:1px solid #f0f0f1;}
+.cobrotbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.cobrotbl td.eq{text-align:right;color:#6b7280;font-size:11px;white-space:nowrap;}
+.cobrotbl tr.cobrototal td{font-weight:700;border-top:1px solid #d1d5db;border-bottom:none;}
+.cobromargin{font-size:11.5px;margin-top:6px;color:#4b5563;}
+.cobromargin b.neg{color:#c0392b;}
+.cobroopt{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 4px;font-size:11.5px;color:#4b5563;}
+.cobroopt select{font-family:inherit;font-size:11.5px;padding:3px 5px;border:1px solid #d1d5db;border-radius:4px;background:#fff;max-width:100%;}
+.cobroissue{font-size:11px;color:#c0392b;margin-top:4px;}
+.cobrosplit{font-size:10.5px;color:#9aa1ac;display:block;}
+
 .convertedhint{white-space:nowrap;font-style:italic;}
 .dirindicator{font-size:11px;color:#6b7280;white-space:nowrap;}
 .dirindicator.dirset{color:#2e7d43;}
@@ -188,7 +210,7 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 <div id="wrap">
   <div class="topbar">
     <div class="topbartext">
-      <h1>DESLOG 253795 Watts — Carta Gantt interactiva (borrador)</h1>
+      <h1><input type="text" id="projectTitleInput" class="projtitle-input" placeholder="Nombre del proyecto"> — Carta Gantt interactiva (borrador)</h1>
       <p class="sub">Semanas contadas desde que se cumplen las condiciones de inicio (Semana 1 = cumplimiento de condiciones). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
     </div>
     <img id="appLogo" class="applogo" alt="Proapsis">
@@ -281,7 +303,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "6";
+var APP_VERSION = "8";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -359,7 +381,7 @@ function defaultState(){
   dep(findAct(m_integ,"Transporte e instalación en planta"), findAct(m_integ,"SAT (puesta en marcha)"));
   dep(findAct(m_integ,"SAT (puesta en marcha)"), findAct(m_integ,"Documentación"));
 
-  return { weeks: 40, modules: modules, deps: deps, finance: defaultFinance() };
+  return { projectTitle: "DESLOG 253795 Watts", weeks: 40, modules: modules, deps: deps, finance: defaultFinance() };
 }
 
 function defaultFinance(){
@@ -372,6 +394,7 @@ function defaultFinance(){
     subcontracts: [],
     mainCurrency: "CLP",
     currencies: [{ code: "UF", rate: null }],
+    cobroOptions: {},
     collapsed: true,
     sectionsCollapsed: { hh: true }
   };
@@ -381,6 +404,7 @@ var STORAGE_KEY = "deslog253795-watts-gantt-v2";
 var OLD_KEY = "deslog253795-watts-gantt-v1";
 
 function migrate(st){
+  if (typeof st.projectTitle !== "string" || !st.projectTitle.trim()) st.projectTitle = "Proyecto sin título";
   if (!Array.isArray(st.modules)) st.modules = [];
   st.modules.forEach(function(m){
     if (typeof m.id === "undefined" || m.id === null) m.id = uid("mod");
@@ -455,6 +479,7 @@ function migrate(st){
   if (!fin.sectionsCollapsed || typeof fin.sectionsCollapsed !== "object") fin.sectionsCollapsed = { hh: true };
   if (typeof fin.sectionsCollapsed.hh === "undefined") fin.sectionsCollapsed.hh = true;
   if (typeof fin.mainCurrency === "undefined" || !fin.mainCurrency) fin.mainCurrency = "CLP";
+  if (!fin.cobroOptions || typeof fin.cobroOptions !== "object" || Array.isArray(fin.cobroOptions)) fin.cobroOptions = {};
   if (!Array.isArray(fin.currencies)) fin.currencies = [];
   fin.currencies.forEach(function(c){
     if (typeof c.code === "undefined" || c.code === null) c.code = "";
@@ -1361,7 +1386,7 @@ function fillGanttSheet(wb, ws){
   ws.getColumn(3).width = 10;
   for (var w=0; w<state.weeks; w++) ws.getColumn(GANTT_LABEL_COLS + 1 + w).width = pxToExcelWidth(XLS_WEEK_COL_PX);
 
-  var titleRow = ws.addRow(["DESLOG 253795 Watts — Carta Gantt"]);
+  var titleRow = ws.addRow([(state.projectTitle || "Proyecto sin título") + " — Carta Gantt"]);
   titleRow.getCell(1).font = { bold:true, size:14 };
   var subRow = ws.addRow(["Semanas contadas desde cumplimiento de condiciones de inicio"]);
   subRow.getCell(1).font = { italic:true, color:{argb:"FF666666"} };
@@ -1750,9 +1775,15 @@ function writeFileSmart(data, mime, filename, ext, btn, okText){
   }
 }
 
+function projectFileBase(){
+  var t = (state.projectTitle || "Proyecto sin título").trim();
+  var slug = t.replace(/[^\\w\\- ]+/g,"").replace(/\\s+/g,"_");
+  return slug || "Proyecto_Gantt";
+}
+
 function exportExcel(){
   var wb = new ExcelJS.Workbook();
-  wb.creator = "DESLOG 253795 Watts";
+  wb.creator = state.projectTitle || "Proyecto sin título";
   var wsGantt = wb.addWorksheet("Gantt");
   var wsFin = wb.addWorksheet("Financiero");
   var wsDeps = wb.addWorksheet("Dependencias");
@@ -1761,7 +1792,7 @@ function exportExcel(){
   fillDepsSheet(wsDeps);
   var btn = document.getElementById("exportBtn");
   wb.xlsx.writeBuffer().then(function(buffer){
-    writeFileSmart(buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DESLOG_253795_Watts_Gantt.xlsx", ".xlsx", btn, "Exportado ✓");
+    writeFileSmart(buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", projectFileBase() + "_Gantt.xlsx", ".xlsx", btn, "Exportado ✓");
   }).catch(function(e){
     window.alert("No se pudo generar el Excel: " + (e && e.message ? e.message : e));
   });
@@ -1769,7 +1800,7 @@ function exportExcel(){
 
 function saveToFile(){
   var data = JSON.stringify(state, null, 2);
-  writeFileSmart(data, "application/json", "DESLOG_253795_Watts_Gantt.json", ".json", document.getElementById("saveFileBtn"), "Guardado ✓");
+  writeFileSmart(data, "application/json", projectFileBase() + "_Gantt.json", ".json", document.getElementById("saveFileBtn"), "Guardado ✓");
 }
 
 // Intenta abrir usando el File System Access API, sugiriendo la carpeta recordada.
@@ -1798,6 +1829,12 @@ function openFileSmart(){
   }
 }
 
+function applyProjectTitle(){
+  var inp = document.getElementById("projectTitleInput");
+  if (inp && document.activeElement !== inp) inp.value = state.projectTitle || "";
+  document.title = (state.projectTitle || "Proyecto sin título") + " — Carta Gantt";
+}
+
 function loadFromFile(file){
   var reader = new FileReader();
   reader.onload = function(ev){
@@ -1809,6 +1846,7 @@ function loadFromFile(file){
       save();
       render();
       document.getElementById("weeksInput").value = state.weeks;
+      applyProjectTitle();
       flashBtn(document.getElementById("loadFileBtn"), "Cargado ✓");
     } catch (e) {
       window.alert("No se pudo cargar el archivo: " + e.message);
@@ -2209,19 +2247,15 @@ function collectClientMilestonesByWeek(){
   return out;
 }
 
-function hhCostByWeek(){
+// Costo de HH por semana en la MONEDA DEL VALOR HH (hhRateCurrency), sin convertir.
+// Es la base de hhCostByWeek() (que además lo convierte a la moneda principal) y del
+// módulo "Cobro por moneda en hitos de cobro" (que necesita el gasto en su moneda original).
+function hhNativeCostByWeek(){
   var n = state.weeks;
   var rate = state.finance.hhRate;
-  var currency = state.finance.hhRateCurrency;
-  var cost = new Array(n);
-  for (var z=0; z<n; z++) cost[z] = 0;
-  if (typeof rate !== "number") return { cost: cost, any: false };
-
-  // El "Valor HH" está en su propia moneda (por defecto UF) — convertimos a la
-  // moneda principal antes de sumarlo con lo demás. Si falta la tasa, no se cuenta
-  // (mejor no incluirlo que mostrar un número equivocado).
-  var convFactor = convertedTotal(1, currency);
-  if (convFactor === null) return { cost: cost, any: false, missingRate: true };
+  var native = new Array(n);
+  for (var z=0; z<n; z++) native[z] = 0;
+  if (typeof rate !== "number") return { native: native, any: false };
 
   // "forma" real: horas por semana según cada actividad, sin aplicar todavía ningún total manual.
   var shape = new Array(n); for (var z2=0; z2<n; z2++) shape[z2] = 0;
@@ -2244,18 +2278,38 @@ function hhCostByWeek(){
     // Usa la distribución real por actividad (respeta dónde se concentran las horas).
     // Si además hay un total manual, sólo reescala la magnitud total — la forma no cambia.
     var scale = (typeof manual === "number" && shapeSum > 0) ? (manual/shapeSum) : 1;
-    for (var w2=0; w2<n; w2++) cost[w2] = shape[w2]*rate*scale*convFactor;
-    return { cost: cost, any: true };
+    for (var w2=0; w2<n; w2++) native[w2] = shape[w2]*rate*scale;
+    return { native: native, any: true };
   }
 
   if (typeof manual === "number"){
     // Sin desglose por actividad: único dato disponible es un total plano, se reparte parejo.
-    var per = (manual*rate*convFactor)/n;
-    for (var w3=0; w3<n; w3++) cost[w3] = per;
-    return { cost: cost, any: true };
+    var per = (manual*rate)/n;
+    for (var w3=0; w3<n; w3++) native[w3] = per;
+    return { native: native, any: true };
   }
 
-  return { cost: cost, any: false };
+  return { native: native, any: false };
+}
+
+function hhCostByWeek(){
+  var n = state.weeks;
+  var rate = state.finance.hhRate;
+  var currency = state.finance.hhRateCurrency;
+  var cost = new Array(n);
+  for (var z=0; z<n; z++) cost[z] = 0;
+  if (typeof rate !== "number") return { cost: cost, any: false };
+
+  // El "Valor HH" está en su propia moneda (por defecto UF) — convertimos a la
+  // moneda principal antes de sumarlo con lo demás. Si falta la tasa, no se cuenta
+  // (mejor no incluirlo que mostrar un número equivocado).
+  var convFactor = convertedTotal(1, currency);
+  if (convFactor === null) return { cost: cost, any: false, missingRate: true };
+
+  var res = hhNativeCostByWeek();
+  if (!res.any) return { cost: cost, any: false };
+  for (var w=0; w<n; w++) cost[w] = res.native[w]*convFactor;
+  return { cost: cost, any: true };
 }
 
 function cashflowByWeek(){
@@ -2290,6 +2344,142 @@ function cashflowByWeek(){
     diffWithHH.push(ai-ae-ah);
   }
   return { ing:ing, egr:egr, hhc:hhc, ingAcum:ingAcum, egrAcum:egrAcum, hhAcum:hhAcum, diffNoHH:diffNoHH, diffWithHH:diffWithHH, hasHHCost:hasHHCost };
+}
+
+// ==================== Cobro por moneda en hitos de cobro ====================
+// Para cada hito de cobro al cliente se calcula cuánto se gasta (pagos de materiales y
+// subcontratos + HH) en cada moneda DESDE EL HITO DE COBRO ANTERIOR hasta este, y cómo
+// se podría cobrar el hito. El monto del hito (su % del contrato) es el que manda: define
+// el margen = monto del hito − gastos del periodo (todo en moneda principal).
+// Convención de semanas: un hito en la semana W ocurre al INICIO de esa semana. Por eso un
+// pago cuenta en el periodo (semana anterior, W] y las HH trabajadas en [semana anterior, W−1].
+var COBRO_OPTIONS = [
+  { key: "main",  label: "Todo en moneda principal" },
+  { key: "costs", label: "Costos en cada moneda + margen en moneda principal" },
+  { key: "prop",  label: "Margen proporcional en cada moneda" }
+];
+function curKey(code){ return ((code||"CLP")+"").toUpperCase(); }
+function cobroOptionOf(msId){
+  var o = state.finance.cobroOptions && state.finance.cobroOptions[msId];
+  return (o === "costs" || o === "prop") ? o : "main";
+}
+// Pagos de materiales y subcontratos con semana resuelta, en su moneda original.
+function collectPaymentEvents(){
+  var out = [];
+  var n = state.weeks;
+  function push(list, total, currency, sourceLabel){
+    (list||[]).forEach(function(ms){
+      var amt = milestoneAmount(total, ms);
+      var wk = milestoneWeek(ms);
+      if (amt === null || wk === null || wk < 0 || wk >= n) return;
+      out.push({ week: wk, currency: curKey(currency), amount: amt, source: sourceLabel, desc: ms.desc || "(sin descripción)" });
+    });
+  }
+  push(state.finance.materials.milestones, state.finance.materials.total, state.finance.materials.currency, "Materiales");
+  state.finance.subcontracts.forEach(function(s){ push(s.milestones, s.amount, s.currency, s.name || "Subcontrato"); });
+  return out;
+}
+function computeCobroAnalysis(){
+  var fin = state.finance, n = state.weeks;
+  var main = curKey(fin.mainCurrency);
+  var cc = fin.clientContract;
+  var resolved = [], unresolved = [];
+  (cc.milestones||[]).forEach(function(ms, idx){
+    var wk = milestoneWeek(ms);
+    if (wk === null || wk < 0 || wk >= n) unresolved.push(ms);
+    else resolved.push({ ms: ms, week: wk, idx: idx });
+  });
+  resolved.sort(function(a,b){ return a.week - b.week || a.idx - b.idx; });
+
+  var payments = collectPaymentEvents();
+  var hh = hhNativeCostByWeek();
+  var hhCur = curKey(fin.hhRateCurrency);
+
+  var rows = [];
+  var prevWeek = null;
+  resolved.forEach(function(h){
+    var wk = h.week;
+    var costByCur = {}, order = [];
+    function addCost(cur, amt){
+      if (!costByCur[cur]){ costByCur[cur] = 0; order.push(cur); }
+      costByCur[cur] += amt;
+    }
+    payments.forEach(function(p){
+      if ((prevWeek === null || p.week > prevWeek) && p.week <= wk) addCost(p.currency, p.amount);
+    });
+    if (hh.any){
+      var hhSumPeriod = 0;
+      for (var w = (prevWeek === null ? 0 : prevWeek); w < wk; w++) hhSumPeriod += hh.native[w];
+      if (hhSumPeriod > 0) addCost(hhCur, hhSumPeriod);
+    }
+    // moneda principal primero, luego el resto en orden alfabético
+    order.sort(function(a,b){ if (a===main) return -1; if (b===main) return 1; return a < b ? -1 : (a > b ? 1 : 0); });
+
+    var issues = [];
+    var costs = [], costsMain = 0, costsComplete = true;
+    order.forEach(function(cur){
+      var amt = costByCur[cur];
+      var mainEq = convertedTotal(amt, cur === "CLP" ? null : cur);
+      if (mainEq === null){ costsComplete = false; issues.push("Falta la tasa de " + cur + " (sección Monedas)."); }
+      else costsMain += mainEq;
+      costs.push({ currency: cur, amount: amt, mainEq: mainEq });
+    });
+
+    var hitoNative = milestoneAmount(cc.total, h.ms);
+    var hitoMain = (hitoNative === null) ? null : convertedTotal(hitoNative, cc.currency);
+    if (hitoNative === null) issues.push("El hito no tiene monto (falta % o total del contrato).");
+    else if (hitoMain === null) issues.push("Falta la tasa de " + curKey(cc.currency) + " para convertir el hito a " + main + ".");
+
+    var margin = (hitoMain !== null && costsComplete) ? (hitoMain - costsMain) : null;
+    var marginPct = (margin !== null && hitoMain) ? (margin / hitoMain * 100) : null;
+
+    var option = cobroOptionOf(h.ms.id);
+    var lines = null;   // null = no se puede calcular con los datos actuales
+    function line(cur, amount, costPart, marginPart){
+      return { currency: cur, amount: amount, costPart: costPart, marginPart: marginPart,
+               mainEq: convertedTotal(amount, cur === "CLP" ? null : cur) };
+    }
+    if (option === "main"){
+      if (hitoMain !== null) lines = [ line(main, hitoMain, 0, 0) ];
+      if (lines && margin !== null) { lines[0].costPart = costsMain; lines[0].marginPart = margin; }
+    } else if (margin !== null && hitoMain !== null){
+      if (option === "costs"){
+        lines = [];
+        var mainCost = 0;
+        costs.forEach(function(c){ if (c.currency === main) mainCost += c.amount; });
+        costs.forEach(function(c){
+          if (c.currency !== main) lines.push(line(c.currency, c.amount, c.amount, 0));
+        });
+        var mainAmt = mainCost + margin;
+        if (mainCost !== 0 || margin !== 0) lines.unshift(line(main, mainAmt, mainCost, margin));
+        if (!lines.length) lines.push(line(main, hitoMain, 0, 0));
+      } else { // "prop": el margen se reparte en cada moneda en proporción a su gasto
+        if (costsMain > 0){
+          var f = hitoMain / costsMain;
+          lines = costs.map(function(c){ return line(c.currency, c.amount * f, c.amount, c.amount * (f - 1)); });
+        } else {
+          lines = [ line(main, hitoMain, 0, margin) ];   // sin gastos en el periodo: todo es margen
+        }
+      }
+    }
+    var cobroMainEq = null;
+    if (lines){
+      cobroMainEq = 0;
+      for (var i=0;i<lines.length;i++){
+        if (lines[i].mainEq === null){ cobroMainEq = null; break; }
+        cobroMainEq += lines[i].mainEq;
+      }
+    }
+    rows.push({
+      ms: h.ms, id: h.ms.id, desc: h.ms.desc || "(sin descripción)", pct: h.ms.pct, week: wk, prevWeek: prevWeek,
+      hitoNative: hitoNative, hitoCurrency: curKey(cc.currency), hitoMain: hitoMain,
+      costs: costs, costsMain: costsComplete ? costsMain : null, costsComplete: costsComplete,
+      margin: margin, marginPct: marginPct, option: option, lines: lines, cobroMainEq: cobroMainEq,
+      issues: issues
+    });
+    prevWeek = wk;
+  });
+  return { main: main, rows: rows, unresolved: unresolved, hhMissingRate: !!(typeof fin.hhRate === "number" && convertedTotal(1, fin.hhRateCurrency) === null) };
 }
 
 // ---- searchable "actividad o módulo" combobox ----
@@ -2637,6 +2827,108 @@ function refreshFinanceComputed(){
   else if (financeChart){ financeChart.destroy(); financeChart = null; }
 }
 
+function buildCobroAnalysisSection(host){
+  var an = computeCobroAnalysis();
+  var main = an.main;
+  host.appendChild(el("div","kpihint",{text:"Para cada hito de cobro: gasto en cada moneda (pagos de materiales y subcontratos + HH) desde el hito de cobro anterior hasta éste, y cómo cobrarlo. El monto del hito (su % del contrato) manda: define el margen = monto del hito − gastos del periodo. Un hito en la semana N cuenta los pagos hasta esa semana y las HH trabajadas antes de ella."}));
+  if (an.hhMissingRate) host.appendChild(el("div","cobroissue",{text:"⚠ Falta la tasa de " + curKey(state.finance.hhRateCurrency) + " (sección Monedas): el costo de HH no se está contando."}));
+  if (!an.rows.length){
+    host.appendChild(el("div","empty",{text:"No hay hitos de cobro con semana definida (asócialos a una actividad/módulo o dales una semana manual en «Contrato con cliente»)."}));
+  }
+  an.rows.forEach(function(r){
+    var card = el("div","cobrocard");
+    card.dataset.msId = r.id;
+    var head = el("div","cobrohead");
+    head.appendChild(el("span","cobrotitle",{text:r.desc}));
+    var amtTxt = r.hitoNative === null ? "sin monto" : fmtMoneyIn(r.hitoNative, r.hitoCurrency);
+    if (r.hitoNative !== null && r.hitoCurrency !== main && r.hitoMain !== null) amtTxt += " ≈ " + fmtMoneyIn(r.hitoMain, main);
+    head.appendChild(el("span","cobrometa",{text:"Semana " + (r.week+1) + (typeof r.pct === "number" ? " · " + r.pct + "% del contrato" : "") + " · " + amtTxt}));
+    var periodTxt = r.prevWeek === null ? "Gastos desde el inicio del proyecto" : ("Gastos desde la semana " + (r.prevWeek+1) + " (hito de cobro anterior)");
+    head.appendChild(el("span","cobrometa",{text:periodTxt}));
+    card.appendChild(head);
+
+    var grid = el("div","cobrogrid");
+
+    // Gastos por moneda
+    var left = el("div");
+    left.appendChild(el("h5",null,{text:"Gasto del periodo por moneda"}));
+    if (!r.costs.length){
+      left.appendChild(el("div","kpihint",{text:"Sin gastos en este periodo."}));
+    } else {
+      var t1 = el("table","cobrotbl"); var tb1 = el("tbody");
+      r.costs.forEach(function(c){
+        var tr = el("tr");
+        tr.appendChild(el("td",null,{text:c.currency}));
+        tr.appendChild(el("td","num",{text:fmtNum(c.amount)}));
+        tr.appendChild(el("td","eq",{text: c.currency === main ? "" : (c.mainEq === null ? "⚠ sin tasa" : "≈ " + fmtMoneyIn(c.mainEq, main))}));
+        tb1.appendChild(tr);
+      });
+      var trT = el("tr","cobrototal");
+      trT.appendChild(el("td",null,{text:"Total en " + main}));
+      trT.appendChild(el("td","num",{text: r.costsMain === null ? "—" : fmtNum(r.costsMain)}));
+      trT.appendChild(el("td"));
+      tb1.appendChild(trT);
+      t1.appendChild(tb1); left.appendChild(t1);
+    }
+    var mg = el("div","cobromargin");
+    if (r.margin === null){ mg.textContent = "Margen: no calculable con los datos actuales."; }
+    else {
+      mg.appendChild(document.createTextNode("Margen del hito (monto − gastos): "));
+      mg.appendChild(el("b", r.margin < 0 ? "neg" : null, {text: fmtMoneyIn(r.margin, main) + (r.marginPct === null ? "" : " (" + (Math.round(r.marginPct*10)/10) + "% del hito)")}));
+    }
+    left.appendChild(mg);
+    grid.appendChild(left);
+
+    // Opción de cobro + resultado
+    var right = el("div");
+    right.appendChild(el("h5",null,{text:"Cómo cobrar este hito"}));
+    var optRow = el("div","cobroopt");
+    var sel = el("select");
+    COBRO_OPTIONS.forEach(function(o){
+      var op = el("option",null,{text:o.label}); op.value = o.key; if (o.key === r.option) op.selected = true;
+      sel.appendChild(op);
+    });
+    sel.value = r.option;
+    sel.addEventListener("change", function(ev){
+      if (!state.finance.cobroOptions) state.finance.cobroOptions = {};
+      state.finance.cobroOptions[r.id] = ev.target.value;
+      save(); renderFinance();
+    });
+    optRow.appendChild(sel);
+    right.appendChild(optRow);
+
+    if (!r.lines){
+      right.appendChild(el("div","kpihint",{text:"No se puede calcular el cobro con los datos actuales (revisa los avisos)."}));
+    } else {
+      var t2 = el("table","cobrotbl"); var tb2 = el("tbody");
+      r.lines.forEach(function(l){
+        var tr = el("tr");
+        tr.appendChild(el("td",null,{text:l.currency}));
+        var tdA = el("td","num"); tdA.appendChild(document.createTextNode(fmtNum(l.amount)));
+        if (r.option !== "main" && (l.costPart || l.marginPart)){
+          tdA.appendChild(el("span","cobrosplit",{text:"costo " + fmtNum(l.costPart) + " + margen " + fmtNum(l.marginPart)}));
+        }
+        tr.appendChild(tdA);
+        tr.appendChild(el("td","eq",{text: l.currency === main ? "" : (l.mainEq === null ? "⚠ sin tasa" : "≈ " + fmtMoneyIn(l.mainEq, main))}));
+        tb2.appendChild(tr);
+      });
+      var trC = el("tr","cobrototal");
+      trC.appendChild(el("td",null,{text:"Cobro total (equiv. " + main + ")"}));
+      trC.appendChild(el("td","num",{text: r.cobroMainEq === null ? "—" : fmtNum(r.cobroMainEq)}));
+      trC.appendChild(el("td"));
+      tb2.appendChild(trC);
+      t2.appendChild(tb2); right.appendChild(t2);
+    }
+    grid.appendChild(right);
+    card.appendChild(grid);
+    r.issues.forEach(function(msg){ card.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
+    host.appendChild(card);
+  });
+  if (an.unresolved.length){
+    host.appendChild(el("div","cobroissue",{text:"⚠ " + an.unresolved.length + " hito(s) de cobro sin semana resuelta no se incluyen: " + an.unresolved.map(function(m){ return m.desc || "(sin descripción)"; }).join(", ") + "."}));
+  }
+}
+
 function renderFinance(){
   var body = document.getElementById("financeBody");
   var fin = state.finance;
@@ -2952,6 +3244,13 @@ function renderFinance(){
   }
   body.appendChild(hhSection);
 
+  // --- Cobro por moneda en hitos de cobro ---
+  var cobroSection = el("div","finsection");
+  var cobroHdr = collapsibleSectionHeader("cobromoneda", "Cobro por moneda en hitos de cobro");
+  cobroSection.appendChild(cobroHdr.head);
+  if (!cobroHdr.collapsed) buildCobroAnalysisSection(cobroSection);
+  body.appendChild(cobroSection);
+
   // --- Flujo de caja ---
   var chartSection = el("div","finsection");
   var chartHdr = collapsibleSectionHeader("flujo", "Flujo de caja acumulado");
@@ -3059,10 +3358,17 @@ document.getElementById("resetBtn").addEventListener("click", function(){
   if (!confirmish(this, "restaurar el borrador inicial (se perderán tus cambios)")) return;
   state = defaultState();
   document.getElementById("weeksInput").value = state.weeks;
+  applyProjectTitle();
   save(); render();
+});
+document.getElementById("projectTitleInput").addEventListener("input", function(ev){
+  state.projectTitle = ev.target.value;
+  document.title = (state.projectTitle || "Proyecto sin título") + " — Carta Gantt";
+  save();
 });
 
 render();
+applyProjectTitle();
 var appVersionEl = document.getElementById("appVersion");
 if (appVersionEl) appVersionEl.textContent = "Versión " + APP_VERSION;
 var appLogoEl = document.getElementById("appLogo");
