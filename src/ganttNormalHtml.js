@@ -161,24 +161,23 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .pctbadge.pctwarn{color:#c0392b;background:rgba(192,57,43,0.08);}
 .currencyinput{width:64px !important;text-transform:uppercase;}
 .currencywarn{font-size:10.5px;color:#c0392b;cursor:help;white-space:nowrap;}
-.cobrocard{border:1px solid #ececec;border-left:4px solid var(--pr-blue);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;box-shadow:0 1px 4px rgba(51,63,72,0.08);}
-.cobrohead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:6px;}
-.cobrohead .cobrotitle{font-size:12.5px;font-weight:700;color:#1f2430;}
-.cobrohead .cobrometa{font-size:11px;color:#6b7280;}
-.cobrogrid{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:flex-start;}
-.cobrogrid > div{min-width:240px;flex:1 1 240px;}
-.cobrogrid h5{margin:0 0 4px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;}
-.cobrotbl{width:100%;border-collapse:collapse;font-size:12px;}
-.cobrotbl td{padding:3px 6px;border-bottom:1px solid #f0f0f1;}
-.cobrotbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
-.cobrotbl td.eq{text-align:right;color:#6b7280;font-size:11px;white-space:nowrap;}
-.cobrotbl tr.cobrototal td{font-weight:700;border-top:1px solid #d1d5db;border-bottom:none;}
-.cobromargin{font-size:11.5px;margin-top:6px;color:#4b5563;}
-.cobromargin b.neg{color:#c0392b;}
-.cobroopt{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 4px;font-size:11.5px;color:#4b5563;}
-.cobroopt select{font-family:inherit;font-size:11.5px;padding:3px 5px;border:1px solid #d1d5db;border-radius:4px;background:#fff;max-width:100%;}
+.cobrobar{margin:4px 0 8px;}
+.cobrowrap{overflow-x:auto;margin-bottom:6px;}
+.cobrotable{border-collapse:collapse;font-size:12px;min-width:100%;background:#fff;}
+.cobrotable th{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:6px 8px;border-bottom:2px solid #d1d5db;text-align:left;white-space:nowrap;}
+.cobrotable th.numh{text-align:right;}
+.cobrotable td{padding:5px 8px;border-bottom:1px solid #f0f0f1;vertical-align:top;}
+.cobrotable td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.cobrotable td.strong{font-weight:700;}
+.cobrotable td.cobrohito{min-width:240px;}
+.cobrotable .cobrotitle{font-size:12.5px;font-weight:700;color:#1f2430;}
+.cobrotable .cobrometa{font-size:11px;color:#6b7280;margin-bottom:3px;}
+.cobrotable select{font-family:inherit;font-size:11px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px;background:#fff;max-width:260px;}
+.cobrotable tfoot td{font-weight:600;border-top:1px solid #d1d5db;border-bottom:none;}
+.cobrotable tr.cobrosub td{font-weight:400;color:#6b7280;font-size:11.5px;border-top:none;}
+.cobrotable tr.cobrowarnrow td{color:#c0392b;font-weight:600;}
+.cobropend{display:block;font-size:10px;color:#c0392b;font-weight:400;cursor:help;}
 .cobroissue{font-size:11px;color:#c0392b;margin-top:4px;}
-.cobrosplit{font-size:10.5px;color:#9aa1ac;display:block;}
 
 .convertedhint{white-space:nowrap;font-style:italic;}
 .dirindicator{font-size:11px;color:#6b7280;white-space:nowrap;}
@@ -303,7 +302,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "8";
+var APP_VERSION = "9";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -2174,6 +2173,19 @@ function hhTotal(){
   if (typeof man === "number") return man;
   return hhSum();
 }
+// Egresos totales del proyecto (materiales + subcontratos) y con el costo de HH, en moneda principal.
+// Usa los totales de cada bloque (no depende de que los hitos de pago tengan semana).
+function egresosTotals(){
+  var fin = state.finance;
+  var mat = convertedTotal(fin.materials.total, fin.materials.currency);
+  var sub = subcontractsTotal();
+  var sinHH = (mat === null && sub === null) ? null : ((mat||0) + (sub||0));
+  var hhT = hhTotal();
+  var hhNative = (typeof fin.hhRate === "number" && hhT !== null) ? hhT*fin.hhRate : null;
+  var hhCost = convertedTotal(hhNative, fin.hhRateCurrency);
+  var conHH = (hhCost === null) ? null : ((sinHH||0) + hhCost);
+  return { sinHH: sinHH, hhCost: hhCost, conHH: conHH, hhFaltante: hhCost === null };
+}
 function subcontractsTotal(){
   var sum = 0, any = false;
   state.finance.subcontracts.forEach(function(s){
@@ -2347,36 +2359,43 @@ function cashflowByWeek(){
 }
 
 // ==================== Cobro por moneda en hitos de cobro ====================
-// Para cada hito de cobro al cliente se calcula cuánto se gasta (pagos de materiales y
-// subcontratos + HH) en cada moneda DESDE EL HITO DE COBRO ANTERIOR hasta este, y cómo
-// se podría cobrar el hito. El monto del hito (su % del contrato) es el que manda: define
-// el margen = monto del hito − gastos del periodo (todo en moneda principal).
-// Convención de semanas: un hito en la semana W ocurre al INICIO de esa semana. Por eso un
-// pago cuenta en el periodo (semana anterior, W] y las HH trabajadas en [semana anterior, W−1].
+// Cada hito de cobro al cliente intenta cubrir, EN CADA MONEDA, los gastos (pagos de materiales y
+// subcontratos + HH) hasta el próximo hito de cobro (el último cubre lo que queda del proyecto).
+// Se trabaja con acumulados: lo que un cobro deja sin cubrir en una moneda (saldo impago) se
+// arrastra y se suma a lo que debe cubrir el siguiente. El monto del hito (su % del contrato,
+// expresado en moneda principal) es fijo y manda:
+//   · si alcanza para cubrir todo lo necesario, lo que sobra es margen;
+//   · si no alcanza, se cubre la misma fracción de cada moneda y el resto queda como saldo impago.
+// Los cobros nunca son negativos en ninguna moneda.
+// Convención de semanas: un hito en la semana W ocurre al INICIO de esa semana, por eso los pagos
+// cuentan hasta la semana W inclusive y las HH solo las semanas anteriores a W.
 var COBRO_OPTIONS = [
-  { key: "main",  label: "Todo en moneda principal" },
   { key: "costs", label: "Costos en cada moneda + margen en moneda principal" },
-  { key: "prop",  label: "Margen proporcional en cada moneda" }
+  { key: "prop",  label: "Margen proporcional en cada moneda" },
+  { key: "main",  label: "Todo en moneda principal" }
 ];
 function curKey(code){ return ((code||"CLP")+"").toUpperCase(); }
 function cobroOptionOf(msId){
   var o = state.finance.cobroOptions && state.finance.cobroOptions[msId];
-  return (o === "costs" || o === "prop") ? o : "main";
+  return (o === "main" || o === "prop") ? o : "costs";
 }
 // Pagos de materiales y subcontratos con semana resuelta, en su moneda original.
+// \`skipped\` cuenta los pagos con monto pero sin semana resuelta (no se pueden ubicar en el tiempo).
 function collectPaymentEvents(){
-  var out = [];
+  var out = [], skipped = 0;
   var n = state.weeks;
   function push(list, total, currency, sourceLabel){
     (list||[]).forEach(function(ms){
       var amt = milestoneAmount(total, ms);
+      if (amt === null) return;
       var wk = milestoneWeek(ms);
-      if (amt === null || wk === null || wk < 0 || wk >= n) return;
+      if (wk === null || wk < 0 || wk >= n){ skipped++; return; }
       out.push({ week: wk, currency: curKey(currency), amount: amt, source: sourceLabel, desc: ms.desc || "(sin descripción)" });
     });
   }
   push(state.finance.materials.milestones, state.finance.materials.total, state.finance.materials.currency, "Materiales");
   state.finance.subcontracts.forEach(function(s){ push(s.milestones, s.amount, s.currency, s.name || "Subcontrato"); });
+  out.skipped = skipped;
   return out;
 }
 function computeCobroAnalysis(){
@@ -2395,91 +2414,93 @@ function computeCobroAnalysis(){
   var hh = hhNativeCostByWeek();
   var hhCur = curKey(fin.hhRateCurrency);
 
-  var rows = [];
-  var prevWeek = null;
-  resolved.forEach(function(h){
-    var wk = h.week;
-    var costByCur = {}, order = [];
-    function addCost(cur, amt){
-      if (!costByCur[cur]){ costByCur[cur] = 0; order.push(cur); }
-      costByCur[cur] += amt;
-    }
-    payments.forEach(function(p){
-      if ((prevWeek === null || p.week > prevWeek) && p.week <= wk) addCost(p.currency, p.amount);
-    });
-    if (hh.any){
-      var hhSumPeriod = 0;
-      for (var w = (prevWeek === null ? 0 : prevWeek); w < wk; w++) hhSumPeriod += hh.native[w];
-      if (hhSumPeriod > 0) addCost(hhCur, hhSumPeriod);
-    }
-    // moneda principal primero, luego el resto en orden alfabético
-    order.sort(function(a,b){ if (a===main) return -1; if (b===main) return 1; return a < b ? -1 : (a > b ? 1 : 0); });
+  // monedas con gastos + la principal (siempre es una columna)
+  var curSeen = {}; curSeen[main] = true;
+  payments.forEach(function(p){ curSeen[p.currency] = true; });
+  if (hh.any) curSeen[hhCur] = true;
+  var cols = Object.keys(curSeen).sort(function(a,b){ if (a===main) return -1; if (b===main) return 1; return a < b ? -1 : (a > b ? 1 : 0); });
 
+  var blocked = [];
+  cols.forEach(function(c){
+    if (c !== main && convertedTotal(1, c) === null) blocked.push("Falta la tasa de " + c + " (sección Monedas).");
+  });
+  var contractMain = convertedTotal(cc.total, cc.currency);
+  if (typeof cc.total === "number" && contractMain === null) blocked.push("Falta la tasa de " + curKey(cc.currency) + " para convertir el contrato a " + main + ".");
+
+  var base = { main: main, cols: cols, rows: [], unresolved: unresolved, blocked: blocked, skippedPayments: payments.skipped || 0, contractMain: contractMain,
+               totals: null, costTotals: {}, unpaid: {} };
+  if (blocked.length || !resolved.length) return base;
+
+  // gasto acumulado en \`cur\` hasta el inicio de la semana W (pagos hasta W inclusive, HH de semanas < W)
+  function costsThrough(cur, W){
+    var sum = 0;
+    payments.forEach(function(p){ if (p.currency === cur && p.week <= W) sum += p.amount; });
+    if (hh.any && cur === hhCur){ for (var w=0; w<W && w<n; w++) sum += hh.native[w]; }
+    return sum;
+  }
+  function clean(x){ return x < 1e-7 ? 0 : x; }
+
+  var covered = {};  // gasto ya cubierto por cobros anteriores, por moneda (nativo)
+  cols.forEach(function(c){ covered[c] = 0; });
+  var totals = { native: {}, mainEq: {}, totalMain: 0, margin: 0 };
+  cols.forEach(function(c){ totals.native[c] = 0; totals.mainEq[c] = 0; });
+
+  resolved.forEach(function(h, i){
+    var Wnext = (i + 1 < resolved.length) ? resolved[i+1].week : n;
     var issues = [];
-    var costs = [], costsMain = 0, costsComplete = true;
-    order.forEach(function(cur){
-      var amt = costByCur[cur];
-      var mainEq = convertedTotal(amt, cur === "CLP" ? null : cur);
-      if (mainEq === null){ costsComplete = false; issues.push("Falta la tasa de " + cur + " (sección Monedas)."); }
-      else costsMain += mainEq;
-      costs.push({ currency: cur, amount: amt, mainEq: mainEq });
-    });
-
     var hitoNative = milestoneAmount(cc.total, h.ms);
-    var hitoMain = (hitoNative === null) ? null : convertedTotal(hitoNative, cc.currency);
-    if (hitoNative === null) issues.push("El hito no tiene monto (falta % o total del contrato).");
-    else if (hitoMain === null) issues.push("Falta la tasa de " + curKey(cc.currency) + " para convertir el hito a " + main + ".");
+    var H = 0;
+    if (hitoNative === null) issues.push("El hito no tiene monto (falta % o total del contrato): se considera 0.");
+    else H = Math.max(0, convertedTotal(hitoNative, cc.currency));
 
-    var margin = (hitoMain !== null && costsComplete) ? (hitoMain - costsMain) : null;
-    var marginPct = (margin !== null && hitoMain) ? (margin / hitoMain * 100) : null;
+    // necesidad por moneda = gasto acumulado hasta el próximo hito − lo ya cubierto
+    var need = {}, needMain = {}, T = 0;
+    cols.forEach(function(c){
+      need[c] = clean(Math.max(0, costsThrough(c, Wnext) - covered[c]));
+      needMain[c] = convertedTotal(need[c], c);
+      T += needMain[c];
+    });
+    var frac = T > 0 ? Math.min(1, H / T) : 0;             // fracción de la necesidad que este hito alcanza a cubrir
+    var costPart = {}, costPartMain = 0;
+    cols.forEach(function(c){ costPart[c] = need[c] * frac; costPartMain += needMain[c] * frac; });
+    var margin = Math.max(0, H - costPartMain);
 
     var option = cobroOptionOf(h.ms.id);
-    var lines = null;   // null = no se puede calcular con los datos actuales
-    function line(cur, amount, costPart, marginPart){
-      return { currency: cur, amount: amount, costPart: costPart, marginPart: marginPart,
-               mainEq: convertedTotal(amount, cur === "CLP" ? null : cur) };
-    }
+    var cells = {};
+    cols.forEach(function(c){ cells[c] = { amount: 0, costPart: 0, marginPart: 0 }; });
     if (option === "main"){
-      if (hitoMain !== null) lines = [ line(main, hitoMain, 0, 0) ];
-      if (lines && margin !== null) { lines[0].costPart = costsMain; lines[0].marginPart = margin; }
-    } else if (margin !== null && hitoMain !== null){
-      if (option === "costs"){
-        lines = [];
-        var mainCost = 0;
-        costs.forEach(function(c){ if (c.currency === main) mainCost += c.amount; });
-        costs.forEach(function(c){
-          if (c.currency !== main) lines.push(line(c.currency, c.amount, c.amount, 0));
-        });
-        var mainAmt = mainCost + margin;
-        if (mainCost !== 0 || margin !== 0) lines.unshift(line(main, mainAmt, mainCost, margin));
-        if (!lines.length) lines.push(line(main, hitoMain, 0, 0));
-      } else { // "prop": el margen se reparte en cada moneda en proporción a su gasto
-        if (costsMain > 0){
-          var f = hitoMain / costsMain;
-          lines = costs.map(function(c){ return line(c.currency, c.amount * f, c.amount, c.amount * (f - 1)); });
-        } else {
-          lines = [ line(main, hitoMain, 0, margin) ];   // sin gastos en el periodo: todo es margen
-        }
-      }
+      cells[main].amount = H; cells[main].costPart = costPart[main]; cells[main].marginPart = H - costPart[main];
+    } else if (option === "prop" && T > 0 && H > T){
+      var scale = H / T;
+      cols.forEach(function(c){ cells[c].amount = need[c] * scale; cells[c].costPart = need[c]; cells[c].marginPart = need[c] * (scale - 1); });
+    } else { // "costs" (y "prop" cuando no alcanza o no hay gastos: el resultado es el mismo)
+      cols.forEach(function(c){ cells[c].amount = costPart[c]; cells[c].costPart = costPart[c]; });
+      cells[main].amount += margin; cells[main].marginPart += margin;
     }
-    var cobroMainEq = null;
-    if (lines){
-      cobroMainEq = 0;
-      for (var i=0;i<lines.length;i++){
-        if (lines[i].mainEq === null){ cobroMainEq = null; break; }
-        cobroMainEq += lines[i].mainEq;
-      }
-    }
-    rows.push({
-      ms: h.ms, id: h.ms.id, desc: h.ms.desc || "(sin descripción)", pct: h.ms.pct, week: wk, prevWeek: prevWeek,
-      hitoNative: hitoNative, hitoCurrency: curKey(cc.currency), hitoMain: hitoMain,
-      costs: costs, costsMain: costsComplete ? costsMain : null, costsComplete: costsComplete,
-      margin: margin, marginPct: marginPct, option: option, lines: lines, cobroMainEq: cobroMainEq,
-      issues: issues
+    var totalMain = 0;
+    cols.forEach(function(c){
+      var cell = cells[c];
+      cell.mainEq = convertedTotal(cell.amount, c);
+      totalMain += cell.mainEq;
+      covered[c] += costPart[c];
+      cell.pending = clean(Math.max(0, costsThrough(c, Wnext) - covered[c]));   // saldo impago tras este cobro
+      totals.native[c] += cell.amount; totals.mainEq[c] += cell.mainEq;
     });
-    prevWeek = wk;
+    totals.totalMain += totalMain; totals.margin += margin;
+    base.rows.push({
+      ms: h.ms, id: h.ms.id, desc: h.ms.desc || "(sin descripción)", pct: h.ms.pct, week: h.week, option: option,
+      hitoMain: H, cells: cells, totalMain: totalMain, margin: margin,
+      pctProject: (contractMain && contractMain > 0) ? (totalMain / contractMain * 100) : null,
+      needMain: T, coveredFraction: frac, issues: issues
+    });
   });
-  return { main: main, rows: rows, unresolved: unresolved, hhMissingRate: !!(typeof fin.hhRate === "number" && convertedTotal(1, fin.hhRateCurrency) === null) };
+  totals.pctProject = (contractMain && contractMain > 0) ? (totals.totalMain / contractMain * 100) : null;
+  base.totals = totals;
+  cols.forEach(function(c){
+    base.costTotals[c] = costsThrough(c, n);
+    base.unpaid[c] = clean(Math.max(0, base.costTotals[c] - covered[c]));
+  });
+  return base;
 }
 
 // ---- searchable "actividad o módulo" combobox ----
@@ -2808,6 +2829,9 @@ function refreshFinanceComputed(){
   var hhCost = convertedTotal(hhCostNative, fin.hhRateCurrency);
   var hhCostEmptyTxt = (hhCostNative !== null && hhCost === null) ? ("— falta tasa de " + (fin.hhRateCurrency||"")) : "— sin valor HH";
   setComputedCardValue("kpiCostoHHVal", hhCost, hhCostEmptyTxt);
+  var egrT = egresosTotals();
+  setComputedCardValue("kpiEgresosVal", egrT.sinHH, "— sin definir");
+  setComputedCardValue("kpiEgresosHHVal", egrT.conHH, egrT.hhFaltante ? "— sin valor HH" : "— sin definir");
 
   var cfData = cashflowByWeek();
   var summary = document.getElementById("finCashSummary");
@@ -2830,103 +2854,185 @@ function refreshFinanceComputed(){
 function buildCobroAnalysisSection(host){
   var an = computeCobroAnalysis();
   var main = an.main;
-  host.appendChild(el("div","kpihint",{text:"Para cada hito de cobro: gasto en cada moneda (pagos de materiales y subcontratos + HH) desde el hito de cobro anterior hasta éste, y cómo cobrarlo. El monto del hito (su % del contrato) manda: define el margen = monto del hito − gastos del periodo. Un hito en la semana N cuenta los pagos hasta esa semana y las HH trabajadas antes de ella."}));
-  if (an.hhMissingRate) host.appendChild(el("div","cobroissue",{text:"⚠ Falta la tasa de " + curKey(state.finance.hhRateCurrency) + " (sección Monedas): el costo de HH no se está contando."}));
+  host.appendChild(el("div","kpihint",{text:"Cada hito de cobro intenta cubrir, en cada moneda, los gastos (materiales, subcontratos y HH) hasta el próximo hito de cobro; el último cubre lo que queda. Lo que un cobro deja sin cubrir en una moneda se arrastra al siguiente. El monto del hito (su % del contrato) es fijo: lo que sobra de cubrir los gastos es margen, y si no alcanza, se cubre la misma fracción de cada moneda. Un hito en la semana N cuenta los pagos hasta esa semana y las HH trabajadas antes de ella."}));
+  if (an.blocked.length){
+    an.blocked.forEach(function(msg){ host.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
+    host.appendChild(el("div","cobroissue",{text:"No se puede calcular la tabla hasta definir las tasas faltantes."}));
+    return;
+  }
   if (!an.rows.length){
     host.appendChild(el("div","empty",{text:"No hay hitos de cobro con semana definida (asócialos a una actividad/módulo o dales una semana manual en «Contrato con cliente»)."}));
-  }
-  an.rows.forEach(function(r){
-    var card = el("div","cobrocard");
-    card.dataset.msId = r.id;
-    var head = el("div","cobrohead");
-    head.appendChild(el("span","cobrotitle",{text:r.desc}));
-    var amtTxt = r.hitoNative === null ? "sin monto" : fmtMoneyIn(r.hitoNative, r.hitoCurrency);
-    if (r.hitoNative !== null && r.hitoCurrency !== main && r.hitoMain !== null) amtTxt += " ≈ " + fmtMoneyIn(r.hitoMain, main);
-    head.appendChild(el("span","cobrometa",{text:"Semana " + (r.week+1) + (typeof r.pct === "number" ? " · " + r.pct + "% del contrato" : "") + " · " + amtTxt}));
-    var periodTxt = r.prevWeek === null ? "Gastos desde el inicio del proyecto" : ("Gastos desde la semana " + (r.prevWeek+1) + " (hito de cobro anterior)");
-    head.appendChild(el("span","cobrometa",{text:periodTxt}));
-    card.appendChild(head);
+  } else {
+    var bar = el("div","cobrobar");
+    var dlBtn = el("button",null,{text:"⬇ Descargar tabla a Excel"});
+    dlBtn.id = "exportCobroBtn";
+    dlBtn.addEventListener("click", exportCobroExcel);
+    bar.appendChild(dlBtn);
+    host.appendChild(bar);
 
-    var grid = el("div","cobrogrid");
+    var wrap = el("div","cobrowrap");
+    var tbl = el("table","cobrotable");
+    var thead = el("thead"); var hr = el("tr");
+    hr.appendChild(el("th",null,{text:"Hito de cobro"}));
+    an.cols.forEach(function(c){ hr.appendChild(el("th","numh",{text:c + (c === main ? " (principal)" : "")})); });
+    hr.appendChild(el("th","numh",{text:"Total en " + main}));
+    hr.appendChild(el("th","numh",{text:"% del proyecto"}));
+    hr.appendChild(el("th","numh",{text:"Margen en " + main}));
+    thead.appendChild(hr); tbl.appendChild(thead);
 
-    // Gastos por moneda
-    var left = el("div");
-    left.appendChild(el("h5",null,{text:"Gasto del periodo por moneda"}));
-    if (!r.costs.length){
-      left.appendChild(el("div","kpihint",{text:"Sin gastos en este periodo."}));
-    } else {
-      var t1 = el("table","cobrotbl"); var tb1 = el("tbody");
-      r.costs.forEach(function(c){
-        var tr = el("tr");
-        tr.appendChild(el("td",null,{text:c.currency}));
-        tr.appendChild(el("td","num",{text:fmtNum(c.amount)}));
-        tr.appendChild(el("td","eq",{text: c.currency === main ? "" : (c.mainEq === null ? "⚠ sin tasa" : "≈ " + fmtMoneyIn(c.mainEq, main))}));
-        tb1.appendChild(tr);
+    var tb = el("tbody");
+    an.rows.forEach(function(r){
+      var tr = el("tr"); tr.dataset.msId = r.id;
+      var tdH = el("td","cobrohito");
+      tdH.appendChild(el("div","cobrotitle",{text:r.desc}));
+      tdH.appendChild(el("div","cobrometa",{text:"Semana " + (r.week+1) + (typeof r.pct === "number" ? " · " + r.pct + "% del contrato" : "")}));
+      var sel = el("select");
+      COBRO_OPTIONS.forEach(function(o){
+        var op = el("option",null,{text:o.label}); op.value = o.key; if (o.key === r.option) op.selected = true;
+        sel.appendChild(op);
       });
-      var trT = el("tr","cobrototal");
-      trT.appendChild(el("td",null,{text:"Total en " + main}));
-      trT.appendChild(el("td","num",{text: r.costsMain === null ? "—" : fmtNum(r.costsMain)}));
-      trT.appendChild(el("td"));
-      tb1.appendChild(trT);
-      t1.appendChild(tb1); left.appendChild(t1);
-    }
-    var mg = el("div","cobromargin");
-    if (r.margin === null){ mg.textContent = "Margen: no calculable con los datos actuales."; }
-    else {
-      mg.appendChild(document.createTextNode("Margen del hito (monto − gastos): "));
-      mg.appendChild(el("b", r.margin < 0 ? "neg" : null, {text: fmtMoneyIn(r.margin, main) + (r.marginPct === null ? "" : " (" + (Math.round(r.marginPct*10)/10) + "% del hito)")}));
-    }
-    left.appendChild(mg);
-    grid.appendChild(left);
-
-    // Opción de cobro + resultado
-    var right = el("div");
-    right.appendChild(el("h5",null,{text:"Cómo cobrar este hito"}));
-    var optRow = el("div","cobroopt");
-    var sel = el("select");
-    COBRO_OPTIONS.forEach(function(o){
-      var op = el("option",null,{text:o.label}); op.value = o.key; if (o.key === r.option) op.selected = true;
-      sel.appendChild(op);
-    });
-    sel.value = r.option;
-    sel.addEventListener("change", function(ev){
-      if (!state.finance.cobroOptions) state.finance.cobroOptions = {};
-      state.finance.cobroOptions[r.id] = ev.target.value;
-      save(); renderFinance();
-    });
-    optRow.appendChild(sel);
-    right.appendChild(optRow);
-
-    if (!r.lines){
-      right.appendChild(el("div","kpihint",{text:"No se puede calcular el cobro con los datos actuales (revisa los avisos)."}));
-    } else {
-      var t2 = el("table","cobrotbl"); var tb2 = el("tbody");
-      r.lines.forEach(function(l){
-        var tr = el("tr");
-        tr.appendChild(el("td",null,{text:l.currency}));
-        var tdA = el("td","num"); tdA.appendChild(document.createTextNode(fmtNum(l.amount)));
-        if (r.option !== "main" && (l.costPart || l.marginPart)){
-          tdA.appendChild(el("span","cobrosplit",{text:"costo " + fmtNum(l.costPart) + " + margen " + fmtNum(l.marginPart)}));
+      sel.value = r.option;
+      sel.addEventListener("change", function(ev){
+        if (!state.finance.cobroOptions) state.finance.cobroOptions = {};
+        state.finance.cobroOptions[r.id] = ev.target.value;
+        save(); renderFinance();
+      });
+      tdH.appendChild(sel);
+      r.issues.forEach(function(msg){ tdH.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
+      tr.appendChild(tdH);
+      an.cols.forEach(function(c){
+        var cell = r.cells[c];
+        var td = el("td","num");
+        if (cell.amount > 0){
+          td.appendChild(document.createTextNode(fmtNum(cell.amount)));
+          td.title = "Cubre gasto: " + fmtNum(cell.costPart) + " " + c + " · margen: " + fmtNum(cell.marginPart) + " " + c;
+        } else td.appendChild(document.createTextNode("—"));
+        if (cell.pending > 0){
+          td.appendChild(el("span","cobropend",{text:"saldo impago: " + fmtNum(cell.pending), title:"Gasto en " + c + " que este cobro no alcanza a cubrir; se suma a lo que debe cubrir el siguiente hito."}));
         }
-        tr.appendChild(tdA);
-        tr.appendChild(el("td","eq",{text: l.currency === main ? "" : (l.mainEq === null ? "⚠ sin tasa" : "≈ " + fmtMoneyIn(l.mainEq, main))}));
-        tb2.appendChild(tr);
+        tr.appendChild(td);
       });
-      var trC = el("tr","cobrototal");
-      trC.appendChild(el("td",null,{text:"Cobro total (equiv. " + main + ")"}));
-      trC.appendChild(el("td","num",{text: r.cobroMainEq === null ? "—" : fmtNum(r.cobroMainEq)}));
-      trC.appendChild(el("td"));
-      tb2.appendChild(trC);
-      t2.appendChild(tb2); right.appendChild(t2);
+      tr.appendChild(el("td","num strong",{text:fmtNum(r.totalMain)}));
+      tr.appendChild(el("td","num",{text: r.pctProject === null ? "—" : (Math.round(r.pctProject*10)/10) + "%"}));
+      tr.appendChild(el("td","num",{text:fmtNum(r.margin)}));
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+
+    var tf = el("tfoot");
+    var trT = el("tr","cobrototal");
+    trT.appendChild(el("td",null,{text:"Total cobrado"}));
+    an.cols.forEach(function(c){ trT.appendChild(el("td","num",{text:fmtNum(an.totals.native[c])})); });
+    trT.appendChild(el("td","num strong",{text:fmtNum(an.totals.totalMain)}));
+    trT.appendChild(el("td","num",{text: an.totals.pctProject === null ? "—" : (Math.round(an.totals.pctProject*10)/10) + "%"}));
+    trT.appendChild(el("td","num",{text:fmtNum(an.totals.margin)}));
+    tf.appendChild(trT);
+    var trE = el("tr","cobrosub");
+    trE.appendChild(el("td",null,{text:"Equivalente en " + main}));
+    an.cols.forEach(function(c){ trE.appendChild(el("td","num",{text:fmtNum(an.totals.mainEq[c])})); });
+    trE.appendChild(el("td")); trE.appendChild(el("td")); trE.appendChild(el("td"));
+    tf.appendChild(trE);
+    var trG = el("tr","cobrosub");
+    trG.appendChild(el("td",null,{text:"Gasto total del proyecto"}));
+    an.cols.forEach(function(c){ trG.appendChild(el("td","num",{text:fmtNum(an.costTotals[c])})); });
+    trG.appendChild(el("td")); trG.appendChild(el("td")); trG.appendChild(el("td"));
+    tf.appendChild(trG);
+    var anyUnpaid = an.cols.some(function(c){ return an.unpaid[c] > 0; });
+    if (anyUnpaid){
+      var trU = el("tr","cobrosub cobrowarnrow");
+      trU.appendChild(el("td",null,{text:"Gasto sin cubrir al final"}));
+      an.cols.forEach(function(c){ trU.appendChild(el("td","num",{text: an.unpaid[c] > 0 ? fmtNum(an.unpaid[c]) : "—"})); });
+      trU.appendChild(el("td")); trU.appendChild(el("td")); trU.appendChild(el("td"));
+      tf.appendChild(trU);
     }
-    grid.appendChild(right);
-    card.appendChild(grid);
-    r.issues.forEach(function(msg){ card.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
-    host.appendChild(card);
-  });
+    tbl.appendChild(tf);
+    wrap.appendChild(tbl);
+    host.appendChild(wrap);
+    host.appendChild(el("div","kpihint",{text:"Los montos de cada celda están en la moneda de su columna; «Total en " + main + "» y «Margen» usan las tasas de la sección Monedas. Pasa el cursor sobre una celda para ver cuánto es gasto y cuánto margen."}));
+    if (anyUnpaid) host.appendChild(el("div","cobroissue",{text:"⚠ Los hitos de cobro no alcanzan a cubrir todos los gastos del proyecto (ver «Gasto sin cubrir al final»)."}));
+  }
   if (an.unresolved.length){
     host.appendChild(el("div","cobroissue",{text:"⚠ " + an.unresolved.length + " hito(s) de cobro sin semana resuelta no se incluyen: " + an.unresolved.map(function(m){ return m.desc || "(sin descripción)"; }).join(", ") + "."}));
   }
+  if (an.skippedPayments){
+    host.appendChild(el("div","cobroissue",{text:"⚠ " + an.skippedPayments + " hito(s) de pago con monto pero sin semana resuelta no se cuentan como gasto."}));
+  }
+}
+
+// Hoja de Excel con la tabla de cobro por moneda (la misma que se ve en pantalla).
+function fillCobroSheet(ws, an){
+  var main = an.main;
+  var titleRow = ws.addRow([(state.projectTitle || "Proyecto sin título") + " — Cobro por moneda en hitos de cobro"]);
+  titleRow.getCell(1).font = { bold:true, size:14 };
+  xlsItalicNote(ws, "Cada hito intenta cubrir, en cada moneda, los gastos hasta el próximo hito de cobro (acumulado; el saldo impago pasa al siguiente). Montos de cada columna en su moneda; totales y margen en " + main + ".");
+  ws.addRow([]);
+  var header = ["Hito de cobro", "Semana", "% del contrato", "Modo de cobro"];
+  an.cols.forEach(function(c){ header.push(c); });
+  header.push("Total en " + main, "% del proyecto", "Margen en " + main);
+  var hr = ws.addRow(header);
+  hr.eachCell(function(cell){ styleHeaderCell(cell, cell.value); cell.alignment = { horizontal:"center", vertical:"middle", wrapText:true }; });
+  var numFmt = "#,##0";
+  var firstCol = 5, lastCurCol = 4 + an.cols.length;
+  function label(key){ var f = COBRO_OPTIONS.filter(function(o){ return o.key === key; })[0]; return f ? f.label : key; }
+  an.rows.forEach(function(r){
+    var vals = [r.desc, r.week + 1, typeof r.pct === "number" ? r.pct/100 : null, label(r.option)];
+    an.cols.forEach(function(c){ vals.push(r.cells[c].amount); });
+    vals.push(r.totalMain, r.pctProject === null ? null : r.pctProject/100, r.margin);
+    var row = ws.addRow(vals);
+    row.eachCell({ includeEmpty:true }, function(cell, colNumber){
+      styleThinBorder(cell);
+      if (colNumber >= firstCol && colNumber !== lastCurCol + 2) cell.numFmt = numFmt;
+      if (colNumber === 3 || colNumber === lastCurCol + 2) cell.numFmt = "0.0%";
+      if (colNumber >= 2) cell.alignment = { horizontal: colNumber === 4 ? "left" : "right" };
+    });
+    row.getCell(lastCurCol + 1).font = { bold:true };
+  });
+  function footer(text, valuesByCol, withTotals, bold){
+    var vals = [text, null, null, null];
+    an.cols.forEach(function(c){ vals.push(valuesByCol(c)); });
+    if (withTotals) vals.push(an.totals.totalMain, an.totals.pctProject === null ? null : an.totals.pctProject/100, an.totals.margin);
+    else vals.push(null, null, null);
+    var row = ws.addRow(vals);
+    row.eachCell({ includeEmpty:true }, function(cell, colNumber){
+      styleThinBorder(cell);
+      cell.font = { bold: !!bold };
+      if (colNumber >= firstCol) cell.numFmt = (colNumber === lastCurCol + 2) ? "0.0%" : numFmt;
+      if (colNumber >= 2) cell.alignment = { horizontal:"right" };
+    });
+    row.getCell(1).alignment = { horizontal:"left" };
+    return row;
+  }
+  footer("Total cobrado", function(c){ return an.totals.native[c]; }, true, true);
+  footer("Equivalente en " + main, function(c){ return an.totals.mainEq[c]; }, false, false);
+  footer("Gasto total del proyecto", function(c){ return an.costTotals[c]; }, false, false);
+  var anyUnpaid = an.cols.some(function(c){ return an.unpaid[c] > 0; });
+  if (anyUnpaid) footer("Gasto sin cubrir al final", function(c){ return an.unpaid[c]; }, false, false);
+  ws.getColumn(1).width = 34;
+  ws.getColumn(2).width = 9;
+  ws.getColumn(3).width = 14;
+  ws.getColumn(4).width = 46;
+  for (var i=0;i<an.cols.length;i++) ws.getColumn(5+i).width = 16;
+  ws.getColumn(5+an.cols.length).width = 18;
+  ws.getColumn(6+an.cols.length).width = 15;
+  ws.getColumn(7+an.cols.length).width = 18;
+  ws.views = [{ state:"frozen", xSplit:1, ySplit:4 }];
+}
+function exportCobroExcel(){
+  var an = computeCobroAnalysis();
+  if (an.blocked.length || !an.rows.length){
+    window.alert("No hay tabla que descargar: " + (an.blocked.length ? an.blocked[0] : "no hay hitos de cobro con semana definida."));
+    return;
+  }
+  var wb = new ExcelJS.Workbook();
+  wb.creator = state.projectTitle || "Proyecto sin título";
+  var ws = wb.addWorksheet("Cobro por moneda");
+  fillCobroSheet(ws, an);
+  var btn = document.getElementById("exportCobroBtn");
+  wb.xlsx.writeBuffer().then(function(buffer){
+    writeFileSmart(buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", projectFileBase() + "_Cobro_por_moneda.xlsx", ".xlsx", btn, "Descargado ✓");
+  }).catch(function(e){
+    window.alert("No se pudo generar el Excel: " + (e && e.message ? e.message : e));
+  });
 }
 
 function renderFinance(){
@@ -3002,10 +3108,9 @@ function renderFinance(){
     var hhCostEmptyTxt2 = (hhCostValNative !== null && hhCostVal === null) ? ("— falta tasa de " + (fin.hhRateCurrency||"")) : "— sin valor HH";
     kpiRow.appendChild(computedCard("Costo HH total", hhCostVal, hhCostEmptyTxt2, "kpiCostoHHVal"));
 
-    var ingTotal = cfData ? cfData.ingAcum[cfData.ingAcum.length-1] : null;
-    var egrTotal = cfData ? cfData.egrAcum[cfData.egrAcum.length-1] : null;
-    kpiRow.appendChild(computedCard("Ingresos totales (hitos)", ingTotal, "— sin hitos de cobro"));
-    kpiRow.appendChild(computedCard("Egresos totales (hitos)", egrTotal, "— sin hitos de pago"));
+    var egrTot = egresosTotals();
+    kpiRow.appendChild(computedCard("Egresos totales", egrTot.sinHH, "— sin definir", "kpiEgresosVal"));
+    kpiRow.appendChild(computedCard("Egresos totales (incluyendo HH)", egrTot.conHH, egrTot.hhFaltante ? "— sin valor HH" : "— sin definir", "kpiEgresosHHVal"));
 
     kpiSection.appendChild(kpiRow);
     kpiSection.appendChild(el("div","kpihint",{text:"Los totales de contrato/materiales/subcontratos se ingresan en sus propias secciones más abajo."}));
