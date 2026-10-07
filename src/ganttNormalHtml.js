@@ -326,7 +326,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "16";
+var APP_VERSION = "17";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -1062,7 +1062,7 @@ function render(){
   for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum" + (clientMsByWeek[w]?" msline":""),{text:String(w+1)}));
   grid.appendChild(hrow);
 
-  var allMilestones = collectAllMilestones();
+  var allMilestones = collectAllMilestones(true);
   if (allMilestones.length){
     var byWeek = {};
     allMilestones.forEach(function(ms){ (byWeek[ms.week] = byWeek[ms.week]||[]).push(ms); });
@@ -1468,7 +1468,7 @@ function fillGanttSheet(wb, ws){
   var clientMs = state.finance.clientContract.milestones || [];
   var msByWeek = {};
   clientMs.forEach(function(ms){
-    var wk = milestoneWeek(ms);
+    var wk = milestoneBaseWeek(ms);
     if (wk===null || wk<0 || wk>=state.weeks) return;
     (msByWeek[wk] = msByWeek[wk] || []).push(ms.desc || "(sin descripción)");
   });
@@ -2306,11 +2306,11 @@ function milestoneAmountConverted(total, currency, ms){
 // Every milestone (cliente/materiales/subcontratos) with a resolved week, for the
 // calendar markers row and the cashflow chart markers. Milestones without a resolved
 // week (no asociación ni semana manual) are excluded — nothing to place on a timeline.
-function collectAllMilestones(){
+function collectAllMilestones(baseWeek){
   var out = [];
   function push(list, total, currency, type, sourceLabel){
     list.forEach(function(ms){
-      var wk = milestoneWeek(ms);
+      var wk = baseWeek ? milestoneBaseWeek(ms) : milestoneWeek(ms);
       if (wk === null || wk < 0 || wk >= state.weeks) return;
       out.push({ desc: ms.desc || "(sin descripción)", type: type, week: wk, amount: milestoneAmountConverted(total, currency, ms), source: sourceLabel });
     });
@@ -2355,7 +2355,7 @@ function milestoneBaseWeek(ms){
 function collectClientMilestonesByWeek(){
   var out = {};
   (state.finance.clientContract.milestones||[]).forEach(function(ms){
-    var wk = milestoneWeek(ms);
+    var wk = milestoneBaseWeek(ms); // el desfase mueve solo el pago, no el hito en la gantt
     if (wk===null || wk<0 || wk>=state.weeks) return;
     (out[wk] = out[wk] || []).push(ms.desc || "(sin descripción)");
   });
