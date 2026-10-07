@@ -323,7 +323,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "14";
+var APP_VERSION = "15";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -418,6 +418,7 @@ function defaultFinance(){
     cobroSplit: {},
     cobroCriteria: {},
     cobroUfAsClp: true,
+    cobroSameWeek: "next",
     collapsed: true,
     sectionsCollapsed: { hh: true }
   };
@@ -513,6 +514,7 @@ function migrate(st){
     else if (v !== "main" && v !== "split" && v !== "criteria") delete fin.cobroOptions[k];
   });
   if (typeof fin.cobroUfAsClp !== "boolean") fin.cobroUfAsClp = true;
+  if (fin.cobroSameWeek !== "prev" && fin.cobroSameWeek !== "next") fin.cobroSameWeek = "next";
   if (!Array.isArray(fin.currencies)) fin.currencies = [];
   fin.currencies.forEach(function(c){
     if (typeof c.code === "undefined" || c.code === null) c.code = "";
@@ -2548,14 +2550,18 @@ function computeCobroAnalysis(){
   var contractMain = convertedTotal(cc.total, cc.currency);
   if (typeof cc.total === "number" && contractMain === null) blocked.push("Falta la tasa de " + curKey(cc.currency) + " para convertir el contrato a " + main + ".");
 
-  var base = { main: main, foldUf: foldUf, cols: cols, rows: [], unresolved: unresolved, blocked: blocked, skippedPayments: payments.skipped || 0, contractMain: contractMain,
+  var base = { main: main, foldUf: foldUf, sameWeek: fin.cobroSameWeek === "prev" ? "prev" : "next", cols: cols, rows: [], unresolved: unresolved, blocked: blocked, skippedPayments: payments.skipped || 0, contractMain: contractMain,
                totals: null, costTotals: {}, unpaid: {}, finalBalance: {} };
   if (blocked.length || !resolved.length) return base;
 
-  // gasto acumulado en \`cur\` hasta el inicio de la semana W (pagos hasta W inclusive, HH de semanas < W)
+  // Criterio para los pagos que caen en la MISMA semana que un hito de cobro:
+  //  · "next" (por defecto, como el gráfico de flujo): los financia ese hito (cuentan en su periodo);
+  //  · "prev" (conservador): los financia el hito anterior (hay que tener el dinero antes del cobro).
+  var conservative = fin.cobroSameWeek === "prev";
+  // gasto acumulado en \`cur\` hasta el inicio de la semana W (HH de semanas < W; pagos de la semana W solo en modo conservador)
   function costsThrough(cur, W){
     var sum = 0;
-    payments.forEach(function(p){ if (p.currency === cur && p.week <= W) sum += p.amount; });
+    payments.forEach(function(p){ if (p.currency === cur && (conservative ? p.week <= W : p.week < W)) sum += p.amount; });
     if (hh.any && cur === hhCur){ for (var w=0; w<W && w<n; w++) sum += hh.native[w]; }
     return sum;
   }
@@ -2658,6 +2664,8 @@ function computeCobroAnalysis(){
     });
   });
   totals.pctProject = (contractMain && contractMain > 0) ? (totals.totalMain / contractMain * 100) : null;
+  totals.share = {};   // peso de cada moneda en el total cobrado (equivalente en moneda principal)
+  cols.forEach(function(c){ totals.share[c] = totals.totalMain > 0 ? (totals.mainEq[c] / totals.totalMain * 100) : null; });
   base.totals = totals;
   cols.forEach(function(c){
     base.costTotals[c] = costsThrough(c, n);
@@ -3140,7 +3148,7 @@ function fmtSigned(n){ return (n < 0 ? "−" : "") + fmtNum(Math.abs(n)); }
 function buildCobroAnalysisSection(host){
   var an = computeCobroAnalysis();
   var main = an.main;
-  host.appendChild(el("div","kpihint",{text:"Cada hito de cobro intenta cubrir, en cada moneda, los gastos (materiales, subcontratos y HH) hasta el próximo hito de cobro; el último cubre lo que queda. Lo que un cobro deja sin cubrir en una moneda se arrastra al siguiente, y el margen cobrado antes cuenta como dinero disponible. El monto del hito (su % del contrato) es fijo: lo que sobra de cubrir los gastos es margen (en «repartido» eliges qué parte del margen se reparte entre las monedas, el resto va a la moneda principal; en «por criterio» fijas tú el % de cada moneda), y si no alcanza, se cubre la misma fracción de cada moneda. Un hito en la semana N cuenta los pagos hasta esa semana y las HH trabajadas antes de ella."}));
+  host.appendChild(el("div","kpihint",{text:"Cada hito de cobro intenta cubrir, en cada moneda, los gastos (materiales, subcontratos y HH) hasta el próximo hito de cobro; el último cubre lo que queda. Lo que un cobro deja sin cubrir en una moneda se arrastra al siguiente, y el margen cobrado antes cuenta como dinero disponible. El monto del hito (su % del contrato) es fijo: lo que sobra de cubrir los gastos es margen (en «repartido» eliges qué parte del margen se reparte entre las monedas, el resto va a la moneda principal; en «por criterio» fijas tú el % de cada moneda), y si no alcanza, se cubre la misma fracción de cada moneda. " + (state.finance.cobroSameWeek === "prev" ? "Criterio conservador: un pago en la misma semana que un hito lo financia el hito anterior (hay que tener el dinero antes del cobro); las HH cuentan las semanas anteriores al hito." : "Un pago en la misma semana que un hito lo financia ese hito (como en el gráfico de flujo); las HH cuentan las semanas anteriores al hito. Puedes cambiarlo al criterio conservador.")}));
   if (an.blocked.length){
     an.blocked.forEach(function(msg){ host.appendChild(el("div","cobroissue",{text:"⚠ " + msg})); });
     host.appendChild(el("div","cobroissue",{text:"No se puede calcular la tabla hasta definir las tasas faltantes."}));
@@ -3158,6 +3166,16 @@ function buildCobroAnalysisSection(host){
       ufLbl.appendChild(document.createTextNode(" Expresar los gastos en UF en CLP"));
       bar.appendChild(ufLbl);
     }
+    var swLbl = el("label","cobroufopt");
+    swLbl.appendChild(document.createTextNode("Pagos en la semana de un hito: "));
+    var swSel = el("select");
+    [["next","los financia ese hito (como el gráfico)"],["prev","los financia el hito anterior (conservador)"]].forEach(function(o){
+      var op = el("option",null,{text:o[1]}); op.value = o[0]; swSel.appendChild(op);
+    });
+    swSel.value = an.sameWeek;
+    swSel.addEventListener("change", function(ev){ state.finance.cobroSameWeek = ev.target.value; save(); renderFinance(); });
+    swLbl.appendChild(swSel);
+    bar.appendChild(swLbl);
     var applyBox = el("span","cobroapply");
     applyBox.appendChild(document.createTextNode("Aplicar a todos los hitos: "));
     var allSel = el("select");
@@ -3287,7 +3305,12 @@ function buildCobroAnalysisSection(host){
     var tf = el("tfoot");
     var trT = el("tr","cobrototal");
     trT.appendChild(el("td",null,{text:"Total cobrado"}));
-    an.cols.forEach(function(c){ trT.appendChild(el("td","num",{text:fmtNum(an.totals.native[c])})); });
+    an.cols.forEach(function(c){
+      var tdT = el("td","num");
+      tdT.appendChild(document.createTextNode(fmtNum(an.totals.native[c])));
+      if (an.totals.share[c] !== null && an.totals.native[c] > 0) tdT.appendChild(el("span","cobroshare",{text:" (" + fmtShare(an.totals.share[c]) + ")", title:"Porcentaje que representa esta moneda del total cobrado en el proyecto (en " + main + ")."}));
+      trT.appendChild(tdT);
+    });
     trT.appendChild(el("td","num strong",{text:fmtNum(an.totals.totalMain)}));
     trT.appendChild(el("td","num",{text: an.totals.pctProject === null ? "—" : (Math.round(an.totals.pctProject*10)/10) + "%"}));
     trT.appendChild(el("td","num",{text:fmtNum(an.totals.margin)}));
@@ -3334,7 +3357,7 @@ function fillCobroSheet(ws, an){
   var main = an.main;
   var titleRow = ws.addRow([(state.projectTitle || "Proyecto sin título") + " — Cobro por moneda en hitos de cobro"]);
   titleRow.getCell(1).font = { bold:true, size:14 };
-  xlsItalicNote(ws, "Cada hito intenta cubrir, en cada moneda, los gastos hasta el próximo hito de cobro (acumulado; el saldo impago pasa al siguiente). Montos de cada columna en su moneda; totales y margen en " + main + ". «% del hito» = peso de la moneda en el total del hito; «Saldo» = cobros acumulados − gastos acumulados hasta el próximo hito.");
+  xlsItalicNote(ws, "Cada hito intenta cubrir, en cada moneda, los gastos hasta el próximo hito de cobro (acumulado; el saldo impago pasa al siguiente). Montos de cada columna en su moneda; totales y margen en " + main + ". «% del hito» = peso de la moneda en el total del hito (en «Total cobrado», en el total del proyecto); «Saldo» = cobros acumulados − gastos acumulados hasta el próximo hito. Pagos en la semana de un hito: " + (an.sameWeek === "prev" ? "los financia el hito anterior (criterio conservador)." : "los financia ese hito."));
   ws.addRow([]);
   var header = ["Hito de cobro", "Semana", "% del contrato", "Modo de cobro"];
   an.cols.forEach(function(c){ header.push(c, "% " + c + " del hito", "Saldo " + c); });
@@ -3367,16 +3390,16 @@ function fillCobroSheet(ws, an){
     row.getCell(totalCol).font = { bold:true };
     an.cols.forEach(function(c, i){ if (r.cells[c].balance < 0) row.getCell(7 + i*3).font = { color:{argb:"FFC0392B"} }; });
   });
-  function footer(text, valuesByCol, withTotals, bold){
+  function footer(text, valuesByCol, withTotals, bold, shareByCol){
     var vals = [text, null, null, null];
-    an.cols.forEach(function(c){ vals.push(valuesByCol(c), null, null); });
+    an.cols.forEach(function(c){ vals.push(valuesByCol(c), shareByCol ? shareByCol(c) : null, null); });
     if (withTotals) vals.push(an.totals.totalMain, an.totals.pctProject === null ? null : an.totals.pctProject/100, an.totals.margin);
     else vals.push(null, null, null);
     var row = ws.addRow(vals);
     styleRow(row, bold);
     return row;
   }
-  footer("Total cobrado", function(c){ return an.totals.native[c]; }, true, true);
+  footer("Total cobrado", function(c){ return an.totals.native[c]; }, true, true, function(c){ return (an.totals.share[c] === null || !(an.totals.native[c] > 0)) ? null : an.totals.share[c]/100; });
   footer("Equivalente en " + main, function(c){ return an.totals.mainEq[c]; }, false, false);
   footer("Gasto total del proyecto", function(c){ return an.costTotals[c]; }, false, false);
   footer("Saldo final (cobrado − gasto)", function(c){ return an.finalBalance[c]; }, false, false);
