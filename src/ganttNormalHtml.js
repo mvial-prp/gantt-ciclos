@@ -207,6 +207,9 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .fintotalwrap input[type=number]{width:120px;font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
 .subbar{display:flex;gap:8px;margin-bottom:8px;}
 .subtoggle{font-size:12px;}
+.delaybar{font-size:11.5px;color:#4b5563;margin:2px 0 6px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.delaybar input{width:60px;font-family:inherit;font-size:11.5px;padding:2px 4px;border:1px solid #d1d5db;border-radius:4px;}
+.fintable input.delayinput, .matlines td input[type=number]{max-width:110px;}
 .matlines td{vertical-align:middle;}
 .matlines td:first-child input{min-width:150px;}
 .matlines .assoccombo{min-width:200px;}
@@ -323,7 +326,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "15";
+var APP_VERSION = "16";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -529,6 +532,7 @@ function migrate(st){
     if (typeof ms.assocId === "undefined") ms.assocId = null;
     if (!ms.moment) ms.moment = "start";
     if (typeof ms.manualWeek !== "number") ms.manualWeek = null;
+    if (typeof ms.delayDays !== "number" || !isFinite(ms.delayDays)) ms.delayDays = 0;
     return ms;
   }
 
@@ -1552,13 +1556,13 @@ function fillGanttSheet(wb, ws){
   addProapsisLogoToGanttSheet(wb, ws);
 }
 
-function addMilestoneBlock(ws, title, total, milestones, currency, titleOverride){
+function addMilestoneBlock(ws, title, total, milestones, currency, titleOverride, showDelay){
   var curTxt = (currency||"CLP").toUpperCase();
   var titleTxt = titleOverride || (title + (typeof total==="number" ? (" — total: " + total + " " + curTxt) : " — (sin total definido)"));
   var tRow = ws.addRow([titleTxt]);
   tRow.getCell(1).font = { bold:true, size:12 };
   var hRow = ws.addRow([]);
-  ["Descripción","%","Monto (moneda propia)","Monto (" + (state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento","Semana"].forEach(function(h,i){
+  ["Descripción","%","Monto (moneda propia)","Monto (" + (state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento","Semana"].concat(showDelay ? ["Desfase (días)"] : []).forEach(function(h,i){
     styleHeaderCell(hRow.getCell(i+1), h);
   });
   if (!milestones.length){
@@ -1577,7 +1581,7 @@ function addMilestoneBlock(ws, title, total, milestones, currency, titleOverride
         assocTxt,
         ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "",
         wk===null?"—":("Semana " + (wk+1))
-      ]);
+      ].concat(showDelay ? [(typeof ms.delayDays === "number" && ms.delayDays !== 0) ? ms.delayDays : ""] : []));
     });
   }
   ws.addRow([]);
@@ -1618,11 +1622,11 @@ function fillFinanceSheet(ws){
   if (cf0 && cf0.hasHHCost) kpiRow("Diferencia con HH", cf0.diffWithHH[cf0.diffWithHH.length-1]);
   ws.addRow([]);
 
-  addMilestoneBlock(ws, "Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones, fin.clientContract.currency);
+  addMilestoneBlock(ws, "Contrato con cliente — hitos de cobro", fin.clientContract.total, fin.clientContract.milestones, fin.clientContract.currency, null, true);
   (function(){
     var mt = materialsTotalMain();
     addMilestoneBlock(ws, "Materiales — pagos por línea", null, fin.materials.milestones, fin.materials.currency,
-      "Materiales — pagos por línea" + (mt === null ? " — (sin montos definidos)" : (" — total: " + Math.round(mt) + " " + (fin.mainCurrency||"CLP"))));
+      "Materiales — pagos por línea" + (mt === null ? " — (sin montos definidos)" : (" — total: " + Math.round(mt) + " " + (fin.mainCurrency||"CLP"))), true);
   })();
 
   var subTitleRow = ws.addRow(["Subcontratos"]);
@@ -1631,7 +1635,7 @@ function fillFinanceSheet(ws){
     xlsItalicNote(ws, "Sin subcontratos.");
   } else {
     fin.subcontracts.forEach(function(s){
-      addMilestoneBlock(ws, "Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones, s.currency);
+      addMilestoneBlock(ws, "Subcontrato: " + (s.name || "(sin nombre)"), s.amount, s.milestones, s.currency, null, true);
     });
   }
 
@@ -2318,7 +2322,16 @@ function collectAllMilestones(){
   });
   return out;
 }
+// Semana de un hito = semana base (actividad/módulo/manual) + desfase en días. El desfase se mide desde el
+// inicio de la semana base: p. ej. +10 días cae en la semana siguiente; +3 días sigue en la misma semana;
+// −3 días cae en la semana anterior. (Los pagos de materiales y subcontratos pueden tener desfase.)
 function milestoneWeek(ms){
+  var base = milestoneBaseWeek(ms);
+  if (base === null) return null;
+  var d = (typeof ms.delayDays === "number" && isFinite(ms.delayDays)) ? Math.round(ms.delayDays) : 0;
+  return base + Math.floor(d / 7);
+}
+function milestoneBaseWeek(ms){
   // Un hito asociado al FIN de una actividad/módulo se ubica en la semana
   // SIGUIENTE a la última semana de esa actividad (o sea, al término de la
   // semana en que termina, no al inicio de ella) — por eso +1.
@@ -2837,8 +2850,13 @@ function mountCashflowChart(cfData){
   });
 }
 
-function newMilestone(){
-  return { id: uid("ms"), desc:"", pct:null, assocKind:null, assocId:null, moment:"start", manualWeek:null };
+// Desfase por defecto de los hitos nuevos: los cobros al cliente se cobran a 30 días; los pagos a proveedores
+// (materiales y subcontratos) se pagan en el momento. Los hitos que ya existían conservan su desfase (0 si no tenían).
+var DEFAULT_CLIENT_DELAY_DAYS = 30;
+var DEFAULT_SUPPLIER_DELAY_DAYS = 0;
+function newMilestone(delayDays){
+  return { id: uid("ms"), desc:"", pct:null, assocKind:null, assocId:null, moment:"start", manualWeek:null,
+           delayDays: (typeof delayDays === "number") ? delayDays : DEFAULT_SUPPLIER_DELAY_DAYS };
 }
 
 function buildTotalRow(label, value, currency, onChangeValue, onChangeCurrency){
@@ -2861,7 +2879,7 @@ function buildTotalRow(label, value, currency, onChangeValue, onChangeCurrency){
   return row;
 }
 
-function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete){
+function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete, opts){
   var tr = el("tr");
 
   var tdDesc = el("td"); var descInp = el("input"); descInp.type="text"; descInp.value=ms.desc; descInp.placeholder="Ej: Facturar 30% previo a envío";
@@ -2897,12 +2915,14 @@ function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete){
   }
   tr.appendChild(tdWhen);
 
+  if (opts && opts.delay){ var tdDl = el("td"); tdDl.appendChild(buildDelayInput(ms)); tr.appendChild(tdDl); }
+
   var tdWeek = el("td");
   var wk = milestoneWeek(ms);
   if (wk === null && typeof ms.pct === "number"){
     tdWeek.appendChild(el("span","weektag weekwarn",{text:"⚠ sin semana", title:"Tiene % asignado pero no se pudo resolver una semana (revisa la actividad/módulo asociado, o define una semana manual). Mientras tanto, este monto NO se cuenta en los totales de ingresos/egresos."}));
   } else {
-    tdWeek.appendChild(el("span","weektag",{text: wk===null ? "—" : ("Semana " + (wk+1))}));
+    tdWeek.appendChild(weekTagEl(wk, ms));
   }
   tr.appendChild(tdWeek);
 
@@ -2925,8 +2945,30 @@ function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete){
   return tr;
 }
 
+// Campo "Desfase (días)": positivo = el pago ocurre después, negativo = antes.
+function buildDelayInput(ms){
+  var di = el("input"); di.type = "number"; di.step = "1"; di.min = "-3650"; di.max = "3650";
+  di.value = (typeof ms.delayDays === "number" && ms.delayDays !== 0) ? ms.delayDays : "";
+  di.placeholder = "0";
+  di.title = "Desfase en días respecto de la fecha del hito (positivo = después, negativo = antes). Ej: 30 = pago a 30 días.";
+  di.addEventListener("change", function(ev){
+    var v = parseInt(ev.target.value, 10);
+    ms.delayDays = isNaN(v) ? 0 : Math.max(-3650, Math.min(3650, v));
+    save(); renderFinance();
+  });
+  return di;
+}
+// Texto/estilo de la semana resuelta; avisa si cae fuera del calendario del proyecto.
+function weekTagEl(wk, ms){
+  var txt = wk === null ? "—" : ("Semana " + (wk+1));
+  var d = (ms && typeof ms.delayDays === "number" && ms.delayDays !== 0) ? (" (" + (ms.delayDays > 0 ? "+" : "") + ms.delayDays + " d)") : "";
+  if (wk !== null && (wk < 0 || wk >= state.weeks)){
+    return el("span","weektag weekwarn",{text:txt + d + " ⚠", title:"Con el desfase, este pago cae fuera del calendario del proyecto (semanas 1–" + state.weeks + "): no se cuenta en el flujo de caja."});
+  }
+  return el("span","weektag",{text: txt + d});
+}
 function newMaterialLine(){
-  return { id: uid("ms"), desc: "", assocKind: "activity", assocId: null, moment: "start", manualWeek: null, amount: null, currency: null };
+  return { id: uid("ms"), desc: "", assocKind: "activity", assocId: null, moment: "start", manualWeek: null, delayDays: DEFAULT_SUPPLIER_DELAY_DAYS, amount: null, currency: null };
 }
 // Materiales: una línea por material/pago, siempre asociada a una actividad, con su propia moneda y monto.
 function buildMaterialsTable(lines, onAdd){
@@ -2937,7 +2979,7 @@ function buildMaterialsTable(lines, onAdd){
   } else {
     var table = el("table","fintable matlines");
     var thead = el("thead"); var htr = el("tr");
-    ["Material","Actividad","Inicio/fin","Moneda","Monto","Semana",""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
+    ["Material","Actividad","Inicio/fin","Desfase (días)","Moneda","Monto","Semana",""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
     thead.appendChild(htr); table.appendChild(thead);
     var tbody = el("tbody");
     lines.forEach(function(ms){
@@ -2967,6 +3009,8 @@ function buildMaterialsTable(lines, onAdd){
       }
       tr.appendChild(tdWhen);
 
+      var tdDelay = el("td"); tdDelay.appendChild(buildDelayInput(ms)); tr.appendChild(tdDelay);
+
       var tdCur = el("td");
       var ci = el("input","currencyinput"); ci.type = "text"; ci.maxLength = 6; ci.placeholder = "CLP"; ci.value = ms.currency || "";
       ci.addEventListener("change", function(ev){ var v = ev.target.value.trim().toUpperCase(); ms.currency = v === "" ? null : v; save(); renderFinance(); });
@@ -2989,7 +3033,7 @@ function buildMaterialsTable(lines, onAdd){
       if (wk === null && typeof ms.amount === "number"){
         tdWeek.appendChild(el("span","weektag weekwarn",{text:"⚠ sin actividad", title:"Asocia el material a una actividad para ubicar su pago en el tiempo. Mientras tanto, este monto NO se cuenta en el flujo de caja."}));
       } else {
-        tdWeek.appendChild(el("span","weektag",{text: wk === null ? "—" : ("Semana " + (wk+1))}));
+        tdWeek.appendChild(weekTagEl(wk, ms));
       }
       tr.appendChild(tdWeek);
 
@@ -3046,14 +3090,14 @@ function pctSumBadge(milestones){
   return el("div", cls, {text: txt});
 }
 
-function buildMilestonesTable(total, milestones, onAdd, emptyHint, currencyCode){
+function buildMilestonesTable(total, milestones, onAdd, emptyHint, currencyCode, opts){
   var wrap = el("div");
   if (!milestones.length){
     wrap.appendChild(el("div","empty",{text: emptyHint || "Sin hitos todavía."}));
   } else {
     var table = el("table","fintable");
     var thead = el("thead"); var htr = el("tr");
-    ["Descripción","%","Monto","Asociado a (actividad o módulo)","Inicio/fin o semana manual","Semana",""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
+    ["Descripción","%","Monto","Asociado a (actividad o módulo)","Inicio/fin o semana manual"].concat(opts && opts.delay ? ["Desfase (días)"] : []).concat(["Semana",""]).forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
     thead.appendChild(htr); table.appendChild(thead);
     var tbody = el("tbody");
     milestones.forEach(function(ms){
@@ -3061,7 +3105,7 @@ function buildMilestonesTable(total, milestones, onAdd, emptyHint, currencyCode)
         var idx = milestones.indexOf(ms);
         if (idx>=0) milestones.splice(idx,1);
         save(); renderFinance();
-      }));
+      }, opts));
     });
     table.appendChild(tbody);
     wrap.appendChild(table);
@@ -3592,9 +3636,24 @@ function renderFinance(){
   if (!clientHdr.collapsed){
     clientSection.appendChild(el("div","kpihint",{text:'Define el monto total del contrato y el % que corresponde a cada hito. Ej: "Facturar 30% previo a envío".'}));
     clientSection.appendChild(buildTotalRow("Total contrato cliente:", fin.clientContract.total, fin.clientContract.currency, function(v){ fin.clientContract.total=v; save(); renderFinance(); }, function(c){ fin.clientContract.currency=c; save(); renderFinance(); }));
+    if (fin.clientContract.milestones.length){
+      var dlyBar = el("div","delaybar");
+      dlyBar.appendChild(document.createTextNode("Aplicar a todos los cobros un desfase de "));
+      var dlyAll = el("input"); dlyAll.type = "number"; dlyAll.step = "1"; dlyAll.value = String(DEFAULT_CLIENT_DELAY_DAYS);
+      dlyBar.appendChild(dlyAll);
+      dlyBar.appendChild(document.createTextNode(" días "));
+      var dlyBtn = el("button",null,{text:"Aplicar desfase"});
+      dlyBtn.addEventListener("click", function(){
+        var v = parseInt(dlyAll.value, 10); if (isNaN(v)) v = 0;
+        fin.clientContract.milestones.forEach(function(m){ m.delayDays = Math.max(-3650, Math.min(3650, v)); });
+        save(); renderFinance();
+      });
+      dlyBar.appendChild(dlyBtn);
+      clientSection.appendChild(dlyBar);
+    }
     clientSection.appendChild(buildMilestonesTable(fin.clientContract.total, fin.clientContract.milestones, function(){
-      fin.clientContract.milestones.push(newMilestone()); save(); renderFinance();
-    }, null, fin.clientContract.currency));
+      fin.clientContract.milestones.push(newMilestone(DEFAULT_CLIENT_DELAY_DAYS)); save(); renderFinance();
+    }, null, fin.clientContract.currency, { delay: true }));
   }
   body.appendChild(clientSection);
 
@@ -3710,7 +3769,7 @@ function renderFinance(){
         } else {
           card.appendChild(buildMilestonesTable(s.amount, s.milestones, function(){
             s.milestones.push(newMilestone()); save(); renderFinance();
-          }, "Sin hitos de pago para este subcontrato todavía.", s.currency));
+          }, "Sin hitos de pago para este subcontrato todavía.", s.currency, { delay: true }));
         }
 
         subSection.appendChild(card);
