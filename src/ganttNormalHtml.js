@@ -326,7 +326,7 @@ var COL_W = 26;
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "17";
+var APP_VERSION = "18";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -2664,6 +2664,9 @@ function computeCobroAnalysis(){
       cell.pending = cell.balance < 0 ? -cell.balance : 0;        // gasto de esa moneda que aún no queda cubierto
       totals.native[c] += cell.amount; totals.mainEq[c] += cell.mainEq;
     });
+    var balanceMain = 0;
+    cols.forEach(function(c){ var bv = convertedTotal(cells[c].balance, c); if (bv !== null) balanceMain += bv; });   // saldo del hito, todas las monedas, en moneda principal
+    if (Math.abs(balanceMain) < 1e-6) balanceMain = 0;
     var rowMargin = totalMain - periodCostMain;
     totals.totalMain += totalMain; totals.margin += rowMargin;
     var shareBase = H > 0 ? H : totalMain;
@@ -2671,7 +2674,7 @@ function computeCobroAnalysis(){
     base.rows.push({
       ms: h.ms, id: h.ms.id, desc: h.ms.desc || "(sin descripción)", pct: h.ms.pct, week: h.week, option: option, splitPct: splitPct,
       criteria: criteria, criteriaSum: criteriaSum, criteriaOk: criteriaSum === null ? true : Math.abs(criteriaSum - 100) <= 0.01,
-      hitoMain: H, cells: cells, totalMain: totalMain, margin: rowMargin, surplus: margin,
+      hitoMain: H, cells: cells, totalMain: totalMain, balanceMain: balanceMain, margin: rowMargin, surplus: margin,
       pctProject: (contractMain && contractMain > 0) ? (totalMain / contractMain * 100) : null,
       needMain: T, coveredFraction: frac, issues: issues
     });
@@ -2680,6 +2683,7 @@ function computeCobroAnalysis(){
   totals.share = {};   // peso de cada moneda en el total cobrado (equivalente en moneda principal)
   cols.forEach(function(c){ totals.share[c] = totals.totalMain > 0 ? (totals.mainEq[c] / totals.totalMain * 100) : null; });
   base.totals = totals;
+  base.finalBalanceMain = base.rows.length ? base.rows[base.rows.length-1].balanceMain : 0;
   cols.forEach(function(c){
     base.costTotals[c] = costsThrough(c, n);
     var fb = base.rows[base.rows.length-1].cells[c].balance;   // acumulado hasta el final del proyecto
@@ -3339,7 +3343,10 @@ function buildCobroAnalysisSection(host){
         td.appendChild(el("span", "cobrosaldo" + (cell.balance < 0 ? " neg" : ""), {text:"saldo: " + fmtSigned(cell.balance), title:"Saldo en " + c + " antes del próximo hito: cobros acumulados − gastos acumulados hasta el próximo hito de cobro."}));
         tr.appendChild(td);
       });
-      tr.appendChild(el("td","num strong",{text:fmtNum(r.totalMain)}));
+      var tdTot = el("td","num strong");
+      tdTot.appendChild(document.createTextNode(fmtNum(r.totalMain)));
+      tdTot.appendChild(el("span", "cobrosaldo" + (r.balanceMain < 0 ? " neg" : ""), {text:"saldo: " + fmtSigned(r.balanceMain), title:"Saldo total del hito: suma de los saldos de todas las monedas, expresada en " + main + " (cobros acumulados − gastos acumulados hasta el próximo hito)."}));
+      tr.appendChild(tdTot);
       tr.appendChild(el("td","num",{text: r.pctProject === null ? "—" : (Math.round(r.pctProject*10)/10) + "%"}));
       tr.appendChild(el("td","num" + (r.margin < 0 ? " negtxt" : ""),{text:fmtSigned(r.margin)}));
       tb.appendChild(tr);
@@ -3372,7 +3379,7 @@ function buildCobroAnalysisSection(host){
     var trS = el("tr","cobrosub");
     trS.appendChild(el("td",null,{text:"Saldo final (cobrado − gasto)"}));
     an.cols.forEach(function(c){ trS.appendChild(el("td","num" + (an.finalBalance[c] < 0 ? " negtxt" : ""),{text:fmtSigned(an.finalBalance[c])})); });
-    trS.appendChild(el("td")); trS.appendChild(el("td")); trS.appendChild(el("td"));
+    trS.appendChild(el("td","num" + (an.finalBalanceMain < 0 ? " negtxt" : ""),{text:fmtSigned(an.finalBalanceMain), title:"Saldo final total en " + main})); trS.appendChild(el("td")); trS.appendChild(el("td"));
     tf.appendChild(trS);
     var anyUnpaid = an.cols.some(function(c){ return an.unpaid[c] > 0; });
     if (anyUnpaid){
@@ -3405,7 +3412,7 @@ function fillCobroSheet(ws, an){
   ws.addRow([]);
   var header = ["Hito de cobro", "Semana", "% del contrato", "Modo de cobro"];
   an.cols.forEach(function(c){ header.push(c, "% " + c + " del hito", "Saldo " + c); });
-  header.push("Total en " + main, "% del proyecto", "Margen en " + main);
+  header.push("Total en " + main, "% del proyecto", "Margen en " + main, "Saldo total en " + main);
   var hr = ws.addRow(header);
   hr.eachCell(function(cell){ styleHeaderCell(cell, cell.value); cell.alignment = { horizontal:"center", vertical:"middle", wrapText:true }; });
   var nc = an.cols.length;
@@ -3428,17 +3435,17 @@ function fillCobroSheet(ws, an){
       var cell = r.cells[c];
       vals.push(cell.amount, cell.share === null || cell.amount <= 0 ? null : cell.share/100, cell.balance);
     });
-    vals.push(r.totalMain, r.pctProject === null ? null : r.pctProject/100, r.margin);
+    vals.push(r.totalMain, r.pctProject === null ? null : r.pctProject/100, r.margin, r.balanceMain);
     var row = ws.addRow(vals);
     styleRow(row, null);
     row.getCell(totalCol).font = { bold:true };
     an.cols.forEach(function(c, i){ if (r.cells[c].balance < 0) row.getCell(7 + i*3).font = { color:{argb:"FFC0392B"} }; });
   });
-  function footer(text, valuesByCol, withTotals, bold, shareByCol){
+  function footer(text, valuesByCol, withTotals, bold, shareByCol, finalMainBal){
     var vals = [text, null, null, null];
     an.cols.forEach(function(c){ vals.push(valuesByCol(c), shareByCol ? shareByCol(c) : null, null); });
-    if (withTotals) vals.push(an.totals.totalMain, an.totals.pctProject === null ? null : an.totals.pctProject/100, an.totals.margin);
-    else vals.push(null, null, null);
+    if (withTotals) vals.push(an.totals.totalMain, an.totals.pctProject === null ? null : an.totals.pctProject/100, an.totals.margin, null);
+    else vals.push(null, null, null, finalMainBal ? an.finalBalanceMain : null);
     var row = ws.addRow(vals);
     styleRow(row, bold);
     return row;
@@ -3446,7 +3453,7 @@ function fillCobroSheet(ws, an){
   footer("Total cobrado", function(c){ return an.totals.native[c]; }, true, true, function(c){ return (an.totals.share[c] === null || !(an.totals.native[c] > 0)) ? null : an.totals.share[c]/100; });
   footer("Equivalente en " + main, function(c){ return an.totals.mainEq[c]; }, false, false);
   footer("Gasto total del proyecto", function(c){ return an.costTotals[c]; }, false, false);
-  footer("Saldo final (cobrado − gasto)", function(c){ return an.finalBalance[c]; }, false, false);
+  footer("Saldo final (cobrado − gasto)", function(c){ return an.finalBalance[c]; }, false, false, null, true);
   var anyUnpaid = an.cols.some(function(c){ return an.unpaid[c] > 0; });
   if (anyUnpaid) footer("Gasto sin cubrir al final", function(c){ return an.unpaid[c]; }, false, false);
   ws.getColumn(1).width = 34;
@@ -3460,7 +3467,7 @@ function fillCobroSheet(ws, an){
   }
   ws.getColumn(totalCol).width = 18;
   ws.getColumn(pctCol).width = 15;
-  ws.getColumn(marginCol).width = 18;
+  ws.getColumn(marginCol).width = 18; ws.getColumn(marginCol + 1).width = 18;
   ws.views = [{ state:"frozen", xSplit:1, ySplit:4 }];
 }
 function exportCobroExcel(){
