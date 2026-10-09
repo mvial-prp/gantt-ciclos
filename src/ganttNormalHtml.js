@@ -101,6 +101,18 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .banner{display:flex;align-items:flex-start;gap:8px;font-size:12px;padding:8px 10px;border-radius:8px;margin-bottom:10px;}
 .banner.bad{background:#fbecec;color:#a12c2c;border:1px solid #f0caca;}
 .banner.ok{background:#eef7f0;color:#2e7d43;border:1px solid #cdead4;}
+.deptools{margin-bottom:10px;padding:8px 10px;background:#f7f7f8;border:1px solid #e5e5e8;border-radius:8px;display:flex;flex-direction:column;gap:6px;}
+.deptools-title{font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;}
+.deptools-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.deptools-lbl{font-size:11px;color:#9aa1ac;width:62px;flex:0 0 auto;}
+.deptools select{font-family:inherit;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;}
+.depautobar .depchk{font-size:12px;color:#4b5563;display:flex;align-items:center;gap:4px;cursor:pointer;}
+.depautomsg{font-size:11px;color:#2e7d43;}
+.depautomsg.warn{color:#a12c2c;}
+button.active{background:#1f2430;color:#fff;border-color:#1f2430;}
+body.linkmode .row .label{cursor:crosshair;}
+.row.linkfrom .label{background:#fff3d6;}
+svg.deparrows{position:absolute;left:0;top:0;pointer-events:none;z-index:1;overflow:visible;}
 .deptoolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;}
 .deptoolbar input[type=text]{font-family:inherit;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;flex:1 1 220px;min-width:160px;}
 .deptoolbar select{font-family:inherit;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;}
@@ -196,7 +208,7 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 .convertedhint{white-space:nowrap;font-style:italic;}
 .dirindicator{font-size:11px;color:#6b7280;white-space:nowrap;}
 .dirindicator.dirset{color:#2e7d43;}
-.chartwrap{position:relative;height:220px;}
+.chartwrap{position:relative;height:440px;}
 .finaddbtn{margin-top:2px;}
 .fincashsummary{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#4b5563;margin-top:8px;}
 .fincashsummary b{color:#1f2430;}
@@ -234,12 +246,13 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
   <div class="topbar">
     <div class="topbartext">
       <h1><input type="text" id="projectTitleInput" class="projtitle-input" placeholder="Nombre del proyecto"> — Carta Gantt interactiva (borrador)</h1>
-      <p class="sub">Semanas contadas desde que se cumplen las condiciones de inicio (Semana 1 = cumplimiento de condiciones). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
+      <p class="sub">Tiempo contado desde que se cumplen las condiciones de inicio (columna 1 = cumplimiento de condiciones; la unidad —días, semanas o meses— se elige en la barra superior). Click en un cuadro vacío extiende la barra; click en el borde de una barra la achica. Arrastra los tiradores de los extremos para mover inicio o fin. Los cambios se guardan solos en este navegador; usa "Guardar archivo" para respaldar o compartir con otra persona.</p>
     </div>
     <img id="appLogo" class="applogo" alt="Proapsis">
   </div>
   <div class="toolbar">
-    <label>Semanas totales <input type="number" id="weeksInput" min="8" max="80" value="40"></label>
+    <label>Unidad <select id="timeUnitInput" title="Unidad de tiempo de las columnas del Gantt y del flujo de caja"><option value="days">Días</option><option value="weeks">Semanas</option><option value="months">Meses</option></select></label>
+    <label><span id="weeksLabel">Semanas totales</span> <input type="number" id="weeksInput" min="8" max="80" value="40"></label>
     <button id="addModuleBtn">+ Módulo</button>
     <button id="collapseAllBtn">Agrupar todos</button>
     <button id="expandAllBtn">Desagrupar todos</button>
@@ -268,6 +281,28 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
     </div>
     <div id="depsBody">
     <div id="depsBanner"></div>
+    <div class="deptools">
+      <div class="deptools-title">Herramientas para crear dependencias</div>
+      <div class="deptools-row">
+        <span class="deptools-lbl">Automático</span>
+        <button id="depDefaultBtn" title="Liga las actividades de cada módulo en el orden en que aparecen (cada una termina antes de que empiece la siguiente: FS, 0 días). Omite el grupo de supervisión y no repite dependencias existentes.">Agregar dependencias por defecto</button>
+        <button id="depGanttBtn" title="Ordena todas las actividades por su inicio en el Gantt y liga cada una con la siguiente. El desfase se calcula con los huecos que dejaste: si hay hueco, FS con ese desfase; si se traslapan, SS con el desfase entre inicios. Así el cronograma actual queda cumpliendo todo.">Activar dependencias según gantt</button>
+        <button id="depUndoBtn" style="display:none;">↶ Deshacer</button>
+      </div>
+      <div class="deptools-row">
+        <span class="deptools-lbl">Gráfico</span>
+        <button id="depLinkBtn" title="Haz clic en una actividad (origen) y luego en otra (destino) del Gantt para crear una dependencia">🔗 Vincular en el Gantt</button>
+        <select id="depLinkType" title="Tipo de dependencia que crea «Vincular en el Gantt»">
+          <option value="FS">fi · fin → inicio</option>
+          <option value="SS">ii · inicio → inicio</option>
+          <option value="FF">ff · fin → fin</option>
+          <option value="SF">if · inicio → fin</option>
+        </select>
+        <label class="depchk" title="Calcula el desfase (en días) con las posiciones actuales de las dos actividades, para que la dependencia nazca cumplida. Si está apagado, el desfase es 0."><input type="checkbox" id="depLinkKeep" checked> Respetar plazos actuales</label>
+        <label class="depchk" title="Dibuja las dependencias como flechas sobre el Gantt"><input type="checkbox" id="depArrowsChk"> Flechas en el Gantt</label>
+      </div>
+      <span class="depautomsg" id="depAutoMsg"></span>
+    </div>
     <div class="depform">
       <select id="depFrom"></select>
       <select id="depType"></select>
@@ -322,11 +357,19 @@ tr.dragover-after td{box-shadow: inset 0 -2px 0 0 #2b6cb0;}
 <script>
 var LABEL_W = 280;
 var COL_W = 26;
+// Unidad de tiempo del proyecto: cada columna del Gantt / punto del flujo es 1 día, 1 semana o 1 mes (30 días).
+var TIME_UNITS = {
+  days:   { key:"days",   days:1,  one:"día",    many:"días",    s:"día(s)",    cap:"Día",    short:"d",   colW:16, min:30, max:730 },
+  weeks:  { key:"weeks",  days:7,  one:"semana", many:"semanas", s:"semana(s)", cap:"Semana", short:"sem", colW:26, min:8,  max:80 },
+  months: { key:"months", days:30, one:"mes",    many:"meses",   s:"mes(es)",   cap:"Mes",    short:"mes", colW:44, min:3,  max:24 }
+};
+function tu(){ return (typeof state !== "undefined" && state && TIME_UNITS[state.timeUnit]) || TIME_UNITS.weeks; }
+function slotDays(){ return tu().days; }
 
 // Número de versión de esta aplicación — se muestra al pie de la página. Súbelo cada
 // vez que se pida un cambio, para que el usuario pueda confirmar visualmente que está
 // abriendo la última versión.
-var APP_VERSION = "18";
+var APP_VERSION = "20";
 
 var COLORS = ["#5DCAA5","#7F77DD","#D85A30","#378ADD","#EF9F27","#D4537E","#639922","#888780"];
 var colorIdx = 0;
@@ -462,6 +505,8 @@ function migrate(st){
   });
   if (!st.deps) st.deps = [];
   if (typeof st.depsCollapsed === "undefined") st.depsCollapsed = false;
+  if (!TIME_UNITS[st.timeUnit]) st.timeUnit = "weeks";
+  if (typeof st.showDepArrows !== "boolean") st.showDepArrows = false;
 
   // semanas: si falta o es inválida, o si hay actividades que se salen del rango, se ajusta sola
   var maxEnd = -1;
@@ -651,7 +696,7 @@ function shiftSelection(deltaWeeks){
   save(); render();
   if (eff !== deltaWeeks){
     var msg = document.getElementById("selBarMsg");
-    if (msg) msg.textContent = "Se aplicó un desplazamiento de " + eff + " semana(s) (ajustado para no salir de la grilla).";
+    if (msg) msg.textContent = "Se aplicó un desplazamiento de " + eff + " " + tu().s + " (ajustado para no salir de la grilla).";
   }
 }
 
@@ -857,7 +902,7 @@ function el(tag, cls, attrs){
 function colTemplate(){ return LABEL_W + "px repeat(" + state.weeks + ", " + COL_W + "px)"; }
 
 function durationOf(a){ return (a.start===null || a.end===null) ? null : (a.end - a.start + 1); }
-function durationLabel(a){ var d = durationOf(a); return d===null ? "" : (d + (d===1?" sem":" sem")); }
+function durationLabel(a){ var d = durationOf(a); return d===null ? "" : (d + " " + tu().short); }
 // Grupos "especiales" (p.ej. Supervisión del proyecto) que corren en paralelo a todo
 // el proyecto y no representan una secuencia real de trabajo: se excluyen del cálculo
 // de ruta crítica (nunca se marcan como críticos, y sus dependencias no afectan a las
@@ -884,11 +929,13 @@ function computeViolations(){
     if (!f || !t) return;
     var fa = f.act, ta = t.act;
     if (fa.start===null || ta.start===null) return;
-    var fStart = fa.start*7, fEnd = (fa.end+1)*7;
-    var tStart = ta.start*7, tEnd = (ta.end+1)*7;
+    var SD = slotDays();
+    var fStart = fa.start*SD, fEnd = (fa.end+1)*SD;
+    var tStart = ta.start*SD, tEnd = (ta.end+1)*SD;
     var delay = d.delay||0;
     var required, actualLhs, label;
     if (d.type === "SS"){ required = fStart + delay; actualLhs = tStart; label="inicio"; }
+    else if (d.type === "SF"){ required = fStart + delay; actualLhs = tEnd; label="fin"; }
     else if (d.type === "FF"){ required = fEnd + delay; actualLhs = tEnd; label="fin"; }
     else { required = fEnd + delay; actualLhs = tStart; label="inicio"; } // FS
     if (actualLhs < required){
@@ -949,9 +996,9 @@ function computeCriticalPath(mode){
     m.activities.forEach(function(a){
       if (a.start === null || a.end === null) return;
       nodeIds.push(a.id);
-      dur[a.id] = (a.end - a.start + 1) * 7;
-      actualES[a.id] = a.start * 7;
-      actualEF[a.id] = (a.end + 1) * 7;
+      dur[a.id] = (a.end - a.start + 1) * slotDays();
+      actualES[a.id] = a.start * slotDays();
+      actualEF[a.id] = (a.end + 1) * slotDays();
     });
   });
   if (!nodeIds.length) return { critical: {}, projectDurationWeeks: 0, count: 0, ok: true };
@@ -971,6 +1018,7 @@ function computeCriticalPath(mode){
         var pEF = EF[e.from], pES = ES[e.from];
         if (e.type === "SS") es = Math.max(es, pES + e.delay);
         else if (e.type === "FF") es = Math.max(es, pEF + e.delay - dur[id]);
+        else if (e.type === "SF") es = Math.max(es, pES + e.delay - dur[id]);
         else es = Math.max(es, pEF + e.delay); // FS
       });
       ES[id] = es;
@@ -995,6 +1043,7 @@ function computeCriticalPath(mode){
         if (LS[e.to] === undefined) return; // sucesor sin semanas asignadas: se ignora ese vínculo
         if (e.type === "SS") lf = Math.min(lf, LS[e.to] - e.delay + dur[id]);
         else if (e.type === "FF") lf = Math.min(lf, LF[e.to] - e.delay);
+        else if (e.type === "SF") lf = Math.min(lf, LF[e.to] - e.delay + dur[id]);
         else lf = Math.min(lf, LS[e.to] - e.delay); // FS
       });
       LF[id] = (lf === Infinity) ? projectFinish : lf;
@@ -1008,7 +1057,7 @@ function computeCriticalPath(mode){
     if (slack <= 0.001){ critical[id] = true; count++; }
   });
 
-  return { critical: critical, projectDurationWeeks: projectFinish/7, count: count, ok: true };
+  return { critical: critical, projectDurationWeeks: Math.round(projectFinish/slotDays()*10)/10, count: count, ok: true };
 }
 
 function render(){
@@ -1025,7 +1074,7 @@ function render(){
     } else {
       critInfoEl.className = "critpathinfo";
       critInfoEl.textContent = crit.count + " actividad" + (crit.count===1?"":"es") + " crítica" + (crit.count===1?"":"s") +
-        " — duración " + (critPathMode==="cpm" ? "teórica" : "actual") + ": " + crit.projectDurationWeeks + " semana" + (crit.projectDurationWeeks===1?"":"s");
+        " — duración " + (critPathMode==="cpm" ? "teórica" : "actual") + ": " + crit.projectDurationWeeks + " " + (crit.projectDurationWeeks===1?tu().one:tu().many);
     }
   }
   var grid = document.getElementById("grid");
@@ -1059,7 +1108,7 @@ function render(){
   colResizeHandle.addEventListener("mousedown", startLabelColResize);
   hLabelCell.appendChild(colResizeHandle);
   hrow.appendChild(hLabelCell);
-  for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum" + (clientMsByWeek[w]?" msline":""),{text:String(w+1)}));
+  for (var w=0; w<state.weeks; w++) hrow.appendChild(el("div","weeknum" + (clientMsByWeek[w]?" msline":""),{text: (tu().key==="days" && (w+1)%5!==0 && w!==0) ? "" : String(w+1), title: tu().cap + " " + (w+1)}));
   grid.appendChild(hrow);
 
   var allMilestones = collectAllMilestones(true);
@@ -1105,7 +1154,7 @@ function render(){
     nameInp.addEventListener("click", function(ev){ ev.stopPropagation(); });
     nameInp.addEventListener("change", function(mm){ return function(ev){ mm.name = ev.target.value; save(); }; }(m));
     mlabel.appendChild(nameInp);
-    if (span) mlabel.appendChild(el("span","durbadge",{text: span.dur + " sem"}));
+    if (span) mlabel.appendChild(el("span","durbadge",{text: span.dur + " " + tu().short}));
     var exemptBtn = el("button","icobtn critexemptbtn" + (m.critExempt ? " active" : ""), {
       text: "⛔",
       title: m.critExempt
@@ -1173,11 +1222,13 @@ function render(){
     m.activities.forEach(function(a){
       var isSel = !!selected[a.id];
       var isCriticalAct = !!(crit && crit.ok && crit.critical[a.id]);
-      var arow = el("div","row" + (isSel ? " selectedrow" : "") + (isCriticalAct ? " criticalrow" : ""));
+      var arow = el("div","row" + (isSel ? " selectedrow" : "") + (isCriticalAct ? " criticalrow" : "") + (linkFrom === a.id ? " linkfrom" : ""));
+      arow.setAttribute("data-act", a.id);
       arow.style.display = "grid";
       arow.style.gridTemplateColumns = colTemplate();
       var alabel = el("div","label");
       alabel.style.paddingLeft = "4px";
+      alabel.addEventListener("click", function(aid){ return function(ev){ if (!linkMode) return; ev.preventDefault(); ev.stopPropagation(); handleLinkClick(aid); }; }(a.id), true);
       var achk = el("input","selchk"); achk.type="checkbox"; achk.checked = isSel;
       achk.addEventListener("change", function(aa){ return function(ev){
         if (ev.target.checked) selected[aa.id]=true; else delete selected[aa.id];
@@ -1305,6 +1356,7 @@ function render(){
   });
 
   renderDeps(vio);
+  drawDepArrows(vio);
   renderLegend();
   renderSelBar();
   renderFinance();
@@ -1320,7 +1372,7 @@ function renderSelBar(){
   bar.appendChild(el("span",null,{text:"mover"}));
   var shiftInp = el("input"); shiftInp.type="number"; shiftInp.value="1"; shiftInp.step="1";
   bar.appendChild(shiftInp);
-  bar.appendChild(el("span",null,{text:"semana(s)"}));
+  bar.appendChild(el("span",null,{text:tu().s}));
   var backBtn = el("button",null,{text:"← Atrás"});
   backBtn.addEventListener("click", function(){ shiftSelection(-(parseInt(shiftInp.value,10)||0)); });
   bar.appendChild(backBtn);
@@ -1485,7 +1537,7 @@ function fillGanttSheet(wb, ws){
   var headerRow = ws.addRow([]);
   styleHeaderCell(headerRow.getCell(1), "Módulo");
   styleHeaderCell(headerRow.getCell(2), "Actividad");
-  styleHeaderCell(headerRow.getCell(3), "Dur. (sem)");
+  styleHeaderCell(headerRow.getCell(3), "Dur. (" + tu().short + ")");
   for (var w2=0; w2<state.weeks; w2++) styleHeaderCell(headerRow.getCell(GANTT_LABEL_COLS + 1 + w2), w2+1);
 
   // La ruta crítica del export siempre muestra algo: usa el modo elegido en pantalla,
@@ -1499,7 +1551,7 @@ function fillGanttSheet(wb, ws){
     var tintArgb = hexToTintArgb(m.color);
     var bandRow = ws.addRow([]);
     var bandCell = bandRow.getCell(1);
-    bandCell.value = m.name + (span ? " (" + span.dur + " sem)" : "");
+    bandCell.value = m.name + (span ? " (" + span.dur + " " + tu().short + ")" : "");
     bandCell.font = { bold:true };
     bandCell.fill = { type:"pattern", pattern:"solid", fgColor:{argb: tintArgb} };
     ws.mergeCells(bandRow.number, 1, bandRow.number, GANTT_LABEL_COLS);
@@ -1562,7 +1614,7 @@ function addMilestoneBlock(ws, title, total, milestones, currency, titleOverride
   var tRow = ws.addRow([titleTxt]);
   tRow.getCell(1).font = { bold:true, size:12 };
   var hRow = ws.addRow([]);
-  ["Descripción","%","Monto (moneda propia)","Monto (" + (state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento","Semana"].concat(showDelay ? ["Desfase (días)"] : []).forEach(function(h,i){
+  ["Descripción","%","Monto (moneda propia)","Monto (" + (state.finance.mainCurrency||"CLP") + ")","Asociado a","Momento",tu().cap].concat(showDelay ? ["Desfase (días)"] : []).forEach(function(h,i){
     styleHeaderCell(hRow.getCell(i+1), h);
   });
   if (!milestones.length){
@@ -1580,7 +1632,7 @@ function addMilestoneBlock(ws, title, total, milestones, currency, titleOverride
         amtConv===null?"":amtConv,
         assocTxt,
         ms.assocKind ? (ms.moment==="end"?"Fin":"Inicio") : "",
-        wk===null?"—":("Semana " + (wk+1))
+        wk===null?"—":(tu().cap + " " + (wk+1))
       ].concat(showDelay ? [(typeof ms.delayDays === "number" && ms.delayDays !== 0) ? ms.delayDays : ""] : []));
     });
   }
@@ -1608,7 +1660,7 @@ function fillFinanceSheet(ws){
   kpiRow("Costo subcontratos, suma (" + mainCur + ")", subcontractsTotal());
   kpiRow("HH suma por actividad", hhSum());
   kpiRow("HH total (usado en el proyecto)", hhTotal());
-  kpiRow("Valor HH (" + (fin.hhRateCurrency||"CLP") + "/hora)", fin.hhRate);
+  kpiRow("Costo HH (" + (fin.hhRateCurrency||"CLP") + "/hora)", fin.hhRate);
   var hhTot0 = hhTotal();
   var hhCostTotal0Native = (typeof fin.hhRate === "number" && hhTot0 !== null) ? hhTot0*fin.hhRate : null;
   kpiRow("Costo HH total (" + (fin.hhRateCurrency||"CLP") + ")", hhCostTotal0Native);
@@ -1664,22 +1716,22 @@ function fillFinanceSheet(ws){
   if (!anyHH) xlsItalicNote(ws, "Sin HH cargadas por actividad.");
   ws.addRow([]);
 
-  var cfTitleRow = ws.addRow(["Flujo de caja acumulado por semana"]);
+  var cfTitleRow = ws.addRow(["Flujo de caja acumulado por " + tu().one]);
   cfTitleRow.getCell(1).font = { bold:true, size:12 };
   var cf = cashflowByWeek();
   var cfHeadRow = ws.addRow([]);
   if (cf && cf.hasHHCost){
-    ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Costo HH acumulado","Diferencia sin HH","Diferencia con HH"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
+    [tu().cap,"Ingreso " + tu().one,"Egreso " + tu().one,"Ingreso acumulado","Egreso acumulado","Costo HH acumulado","Diferencia sin HH","Diferencia con HH"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
     for (var i=0;i<state.weeks;i++){
       ws.addRow([i+1, cf.ing[i], cf.egr[i], cf.ingAcum[i], cf.egrAcum[i], cf.hhAcum[i], cf.diffNoHH[i], cf.diffWithHH[i]]);
     }
   } else if (cf){
-    ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
+    [tu().cap,"Ingreso " + tu().one,"Egreso " + tu().one,"Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
     for (var i2=0;i2<state.weeks;i2++){
       ws.addRow([i2+1, cf.ing[i2], cf.egr[i2], cf.ingAcum[i2], cf.egrAcum[i2], cf.diffNoHH[i2]]);
     }
   } else {
-    ["Semana","Ingreso semana","Egreso semana","Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
+    [tu().cap,"Ingreso " + tu().one,"Egreso " + tu().one,"Ingreso acumulado","Egreso acumulado","Diferencia acumulada"].forEach(function(h,i){ styleHeaderCell(cfHeadRow.getCell(i+1), h); });
     xlsItalicNote(ws, "Sin hitos con % y total definidos, ni valor HH.");
   }
 }
@@ -1920,7 +1972,7 @@ function loadFromFile(file){
       selected = {};
       save();
       render();
-      document.getElementById("weeksInput").value = state.weeks;
+      syncTimeUnitUI();
       applyProjectTitle();
       flashBtn(document.getElementById("loadFileBtn"), "Cargado ✓");
     } catch (e) {
@@ -1944,12 +1996,13 @@ function fillActivitySelect(sel, selectedId){
 var TYPE_LABELS = {
   FS: "Fin antes de inicio (fin → inicio)",
   SS: "Inicio antes de inicio (inicio → inicio)",
-  FF: "Fin antes de fin (fin → fin)"
+  FF: "Fin antes de fin (fin → fin)",
+  SF: "Inicio antes de fin (inicio → fin)"
 };
 function typeLabel(tk){ return TYPE_LABELS[tk] || tk; }
 function fillTypeSelect(sel, selectedType){
   sel.innerHTML = "";
-  ["FS","SS","FF"].forEach(function(tk){
+  ["FS","SS","FF","SF"].forEach(function(tk){
     var o = el("option"); o.value = tk; o.textContent = typeLabel(tk);
     if (tk === selectedType) o.selected = true;
     sel.appendChild(o);
@@ -2329,7 +2382,7 @@ function milestoneWeek(ms){
   var base = milestoneBaseWeek(ms);
   if (base === null) return null;
   var d = (typeof ms.delayDays === "number" && isFinite(ms.delayDays)) ? Math.round(ms.delayDays) : 0;
-  return base + Math.floor(d / 7);
+  return base + Math.floor(d / slotDays());
 }
 function milestoneBaseWeek(ms){
   // Un hito asociado al FIN de una actividad/módulo se ubica en la semana
@@ -2829,7 +2882,7 @@ function mountCashflowChart(cfData){
       responsive: true, maintainAspectRatio: false,
       interaction: { mode:"index", intersect:false },
       scales: {
-        x: { title: { display:true, text:"Semana", font:{size:10} }, ticks:{font:{size:9}} },
+        x: { title: { display:true, text:tu().cap, font:{size:10} }, ticks:{font:{size:9}} },
         y: { ticks: { callback: function(v){ return fmtNum(v); }, font:{size:9} } }
       },
       plugins: {
@@ -2913,7 +2966,7 @@ function buildMilestoneRow(ms, total, currencyCode, milestones, onDelete, opts){
   } else {
     var wkInp = el("input"); wkInp.type="number"; wkInp.min=1; wkInp.max=state.weeks;
     wkInp.value = (typeof ms.manualWeek === "number") ? (ms.manualWeek+1) : "";
-    wkInp.placeholder="Semana manual";
+    wkInp.placeholder=tu().cap + " manual";
     wkInp.addEventListener("change", function(ev){ var v=ev.target.value; ms.manualWeek = v===""?null:(parseInt(v,10)-1); save(); renderFinance(); });
     tdWhen.appendChild(wkInp);
   }
@@ -2964,7 +3017,7 @@ function buildDelayInput(ms){
 }
 // Texto/estilo de la semana resuelta; avisa si cae fuera del calendario del proyecto.
 function weekTagEl(wk, ms){
-  var txt = wk === null ? "—" : ("Semana " + (wk+1));
+  var txt = wk === null ? "—" : (tu().cap + " " + (wk+1));
   var d = (ms && typeof ms.delayDays === "number" && ms.delayDays !== 0) ? (" (" + (ms.delayDays > 0 ? "+" : "") + ms.delayDays + " d)") : "";
   if (wk !== null && (wk < 0 || wk >= state.weeks)){
     return el("span","weektag weekwarn",{text:txt + d + " ⚠", title:"Con el desfase, este pago cae fuera del calendario del proyecto (semanas 1–" + state.weeks + "): no se cuenta en el flujo de caja."});
@@ -2983,7 +3036,7 @@ function buildMaterialsTable(lines, onAdd){
   } else {
     var table = el("table","fintable matlines");
     var thead = el("thead"); var htr = el("tr");
-    ["Material","Actividad","Inicio/fin","Desfase (días)","Moneda","Monto","Semana",""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
+    ["Material","Actividad","Inicio/fin","Desfase (días)","Moneda","Monto",tu().cap,""].forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
     thead.appendChild(htr); table.appendChild(thead);
     var tbody = el("tbody");
     lines.forEach(function(ms){
@@ -3002,7 +3055,7 @@ function buildMaterialsTable(lines, onAdd){
       var tdWhen = el("td");
       if (ms.assocKind === null && typeof ms.manualWeek === "number"){
         // línea antigua con semana manual: se conserva hasta que se le asigne una actividad
-        var wki = el("input"); wki.type = "number"; wki.min = 1; wki.max = state.weeks; wki.value = ms.manualWeek + 1; wki.placeholder = "Semana";
+        var wki = el("input"); wki.type = "number"; wki.min = 1; wki.max = state.weeks; wki.value = ms.manualWeek + 1; wki.placeholder = tu().cap;
         wki.addEventListener("change", function(ev){ var v = ev.target.value; ms.manualWeek = v === "" ? null : (parseInt(v,10) - 1); save(); renderFinance(); });
         tdWhen.appendChild(wki);
       } else {
@@ -3101,7 +3154,7 @@ function buildMilestonesTable(total, milestones, onAdd, emptyHint, currencyCode,
   } else {
     var table = el("table","fintable");
     var thead = el("thead"); var htr = el("tr");
-    ["Descripción","%","Monto","Asociado a (actividad o módulo)","Inicio/fin o semana manual"].concat(opts && opts.delay ? ["Desfase (días)"] : []).concat(["Semana",""]).forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
+    ["Descripción","%","Monto","Asociado a (actividad o módulo)","Inicio/fin o semana manual"].concat(opts && opts.delay ? ["Desfase (días)"] : []).concat([tu().cap,""]).forEach(function(h){ htr.appendChild(el("th",null,{text:h})); });
     thead.appendChild(htr); table.appendChild(thead);
     var tbody = el("tbody");
     milestones.forEach(function(ms){
@@ -3270,7 +3323,7 @@ function buildCobroAnalysisSection(host){
       var tr = el("tr"); tr.dataset.msId = r.id;
       var tdH = el("td","cobrohito");
       tdH.appendChild(el("div","cobrotitle",{text:r.desc}));
-      tdH.appendChild(el("div","cobrometa",{text:"Semana " + (r.week+1) + (typeof r.pct === "number" ? " · " + r.pct + "% del contrato" : "")}));
+      tdH.appendChild(el("div","cobrometa",{text:tu().cap + " " + (r.week+1) + (typeof r.pct === "number" ? " · " + r.pct + "% del contrato" : "")}));
       var sel = el("select");
       COBRO_OPTIONS.forEach(function(o){
         var op = el("option",null,{text:o.label}); op.value = o.key; if (o.key === r.option) op.selected = true;
@@ -3410,7 +3463,7 @@ function fillCobroSheet(ws, an){
   titleRow.getCell(1).font = { bold:true, size:14 };
   xlsItalicNote(ws, "Cada hito intenta cubrir, en cada moneda, los gastos hasta el próximo hito de cobro (acumulado; el saldo impago pasa al siguiente). Montos de cada columna en su moneda; totales y margen en " + main + ". «% del hito» = peso de la moneda en el total del hito (en «Total cobrado», en el total del proyecto); «Saldo» = cobros acumulados − gastos acumulados hasta el próximo hito. Pagos en la semana de un hito: " + (an.sameWeek === "prev" ? "los financia el hito anterior (criterio conservador)." : "los financia ese hito."));
   ws.addRow([]);
-  var header = ["Hito de cobro", "Semana", "% del contrato", "Modo de cobro"];
+  var header = ["Hito de cobro", tu().cap, "% del contrato", "Modo de cobro"];
   an.cols.forEach(function(c){ header.push(c, "% " + c + " del hito", "Saldo " + c); });
   header.push("Total en " + main, "% del proyecto", "Margen en " + main, "Saldo total en " + main);
   var hr = ws.addRow(header);
@@ -3535,7 +3588,7 @@ function renderFinance(){
     kpiRow.appendChild(hhCard);
 
     var rateCard = el("div","kpicard");
-    rateCard.appendChild(el("label",null,{text:"Valor HH (por hora)"}));
+    rateCard.appendChild(el("label",null,{text:"Costo HH (por hora)"}));
     var rateWrap = el("div"); rateWrap.style.display="flex"; rateWrap.style.gap="4px"; rateWrap.style.alignItems="center";
     var rateInp = el("input"); rateInp.type="number"; rateInp.placeholder="—"; rateInp.style.flex="1 1 auto";
     rateInp.value = fin.hhRate===null?"":fin.hhRate;
@@ -3868,10 +3921,48 @@ function renderFinance(){
   if (!chartHdr.collapsed && cfData) mountCashflowChart(cfData);
 }
 
+function syncTimeUnitUI(){
+  var U = tu();
+  COL_W = U.colW;
+  var sel = document.getElementById("timeUnitInput"); if (sel) sel.value = U.key;
+  var inp = document.getElementById("weeksInput");
+  if (inp){ inp.min = U.min; inp.max = U.max; inp.value = state.weeks; }
+  var lbl = document.getElementById("weeksLabel"); if (lbl) lbl.textContent = U.many.charAt(0).toUpperCase() + U.many.slice(1) + " totales";
+  var ch = document.getElementById("depArrowsChk"); if (ch) ch.checked = !!state.showDepArrows;
+}
+// Convierte la posición de una columna de una unidad a otra (inicio redondea hacia abajo; fin hacia arriba).
+function convSlot(i, fromD, toD, isEnd){
+  if (typeof i !== "number") return i;
+  if (isEnd) return Math.max(0, Math.ceil((i+1)*fromD/toD) - 1);
+  return Math.max(0, Math.floor(i*fromD/toD));
+}
+function changeTimeUnit(newKey){
+  var oldKey = state.timeUnit || "weeks";
+  if (newKey === oldKey || !TIME_UNITS[newKey]) return;
+  var fromD = TIME_UNITS[oldKey].days, toD = TIME_UNITS[newKey].days, N = TIME_UNITS[newKey];
+  if (!window.confirm("Se convertirá todo el proyecto a " + N.many + " (actividades, hitos, flujo). Las posiciones se redondean, así que volver atrás puede no recuperar exactamente el cronograma original. ¿Continuar?")){
+    syncTimeUnitUI(); return;
+  }
+  state.modules.forEach(function(m){ m.activities.forEach(function(a){
+    if (a.start === null || a.end === null) return;
+    var ns = convSlot(a.start, fromD, toD, false), ne = convSlot(a.end, fromD, toD, true);
+    a.start = ns; a.end = Math.max(ns, ne);
+  }); });
+  function convMs(list){ (list||[]).forEach(function(ms){ if (typeof ms.manualWeek === "number") ms.manualWeek = convSlot(ms.manualWeek, fromD, toD, false); }); }
+  var fin = state.finance;
+  convMs(fin.clientContract && fin.clientContract.milestones);
+  convMs(fin.materials && fin.materials.milestones);
+  (fin.subcontracts||[]).forEach(function(sc){ convMs(sc.milestones); });
+  state.weeks = Math.min(N.max, Math.max(N.min, Math.ceil(state.weeks * fromD / toD)));
+  state.timeUnit = newKey;
+  syncTimeUnitUI();
+  save(); render();
+}
+document.getElementById("timeUnitInput").addEventListener("change", function(ev){ changeTimeUnit(ev.target.value); });
 document.getElementById("weeksInput").addEventListener("change", function(ev){
   var v = parseInt(ev.target.value, 10);
-  if (isNaN(v) || v < 8) v = 8;
-  if (v > 80) v = 80;
+  if (isNaN(v) || v < tu().min) v = tu().min;
+  if (v > tu().max) v = tu().max;
   state.weeks = v;
   state.modules.forEach(function(m){
     m.activities.forEach(function(a){
@@ -3881,7 +3972,7 @@ document.getElementById("weeksInput").addEventListener("change", function(ev){
   });
   save(); render();
 });
-document.getElementById("weeksInput").value = state.weeks;
+syncTimeUnitUI();
 
 document.getElementById("addModuleBtn").addEventListener("click", function(){
   state.modules.push({ id: uid("mod"), name: "Nuevo módulo", color: nextColor(), collapsed:false, activities: [
@@ -3922,6 +4013,156 @@ document.querySelectorAll("#depsTable th[data-key]").forEach(function(th){
     renderDepsOnly();
   });
 });
+// ---- Ayudas para crear dependencias ----
+var depUndoSnap = null;      // copia de state.deps antes de la última carga automática
+var linkMode = false, linkFrom = null;
+function depMsg(txt, warn){ var m = document.getElementById("depAutoMsg"); if (!m) return; m.textContent = txt || ""; m.className = "depautomsg" + (warn ? " warn" : ""); }
+function depPairExists(a, b){ return state.deps.some(function(d){ return (d.from === a && d.to === b) || (d.from === b && d.to === a); }); }
+// ¿agregar from→to cerraría un ciclo? (hay camino to ⇒ from)
+function depWouldCycle(from, to){
+  var seen = {}, stack = [to];
+  while (stack.length){
+    var cur = stack.pop();
+    if (cur === from) return true;
+    if (seen[cur]) continue; seen[cur] = true;
+    state.deps.forEach(function(d){ if (d.from === cur) stack.push(d.to); });
+  }
+  return false;
+}
+function pushAutoDep(from, to, type, delay, stat){
+  if (depPairExists(from, to)){ stat.dup++; return; }
+  if (depWouldCycle(from, to)){ stat.cycle++; return; }
+  state.deps.push({ id: uid("dep"), from: from, to: to, type: type, delay: Math.max(0, Math.round(delay)) });
+  stat.added++;
+}
+function finishAutoDeps(stat, what){
+  var undo = document.getElementById("depUndoBtn"); if (undo) undo.style.display = stat.added ? "" : "none";
+  if (!stat.added) depUndoSnap = null;
+  save(); render();
+  var txt = what + ": " + stat.added + " dependencia" + (stat.added===1?"":"s") + " agregada" + (stat.added===1?"":"s");
+  if (stat.dup) txt += " · " + stat.dup + " ya existía" + (stat.dup===1?"":"n");
+  if (stat.cycle) txt += " · " + stat.cycle + " omitida" + (stat.cycle===1?"":"s") + " por ciclo";
+  depMsg(txt, false);
+}
+// Liga las actividades de cada módulo, en su orden, de a pares consecutivos (FS, 0 días).
+function addDefaultDeps(){
+  var stat = { added:0, dup:0, cycle:0 };
+  depUndoSnap = JSON.parse(JSON.stringify(state.deps));
+  state.modules.forEach(function(m){
+    if (isCritExemptModule(m)) return;
+    for (var i=1; i<m.activities.length; i++) pushAutoDep(m.activities[i-1].id, m.activities[i].id, "FS", 0, stat);
+  });
+  finishAutoDeps(stat, "Por defecto");
+}
+// Ordena todas las actividades por inicio en el Gantt y liga cada una solo con la siguiente, usando los huecos del usuario como desfase.
+function addGanttDeps(){
+  var list = [], k = 0;
+  state.modules.forEach(function(m){
+    if (isCritExemptModule(m)) return;
+    m.activities.forEach(function(a){ if (a.start !== null && a.end !== null) list.push({ a:a, k:k++ }); });
+  });
+  list.sort(function(x, y){ return (x.a.start - y.a.start) || (x.a.end - y.a.end) || (x.k - y.k); });
+  var stat = { added:0, dup:0, cycle:0 }, SD = slotDays();
+  depUndoSnap = JSON.parse(JSON.stringify(state.deps));
+  for (var i=1; i<list.length; i++){
+    var cur = list[i-1].a, nxt = list[i].a;
+    var gap = (nxt.start - (cur.end + 1)) * SD;          // días libres entre el fin de una y el inicio de la siguiente
+    if (gap >= 0) pushAutoDep(cur.id, nxt.id, "FS", gap, stat);
+    else pushAutoDep(cur.id, nxt.id, "SS", (nxt.start - cur.start) * SD, stat);   // se traslapan: inicio-inicio
+  }
+  finishAutoDeps(stat, "Según Gantt");
+}
+document.getElementById("depDefaultBtn").addEventListener("click", addDefaultDeps);
+document.getElementById("depGanttBtn").addEventListener("click", addGanttDeps);
+document.getElementById("depUndoBtn").addEventListener("click", function(){
+  if (!depUndoSnap) return;
+  state.deps = depUndoSnap; depUndoSnap = null;
+  this.style.display = "none"; save(); render(); depMsg("Se deshizo la última carga automática.", false);
+});
+document.getElementById("depArrowsChk").addEventListener("change", function(ev){ state.showDepArrows = !!ev.target.checked; save(); drawDepArrows(computeViolations()); });
+function setLinkMode(on){
+  linkMode = !!on; linkFrom = null;
+  document.body.classList.toggle("linkmode", linkMode);
+  var b = document.getElementById("depLinkBtn"); if (b) b.classList.toggle("active", linkMode);
+  if (linkMode){ state.showDepArrows = true; var ch = document.getElementById("depArrowsChk"); if (ch) ch.checked = true; depMsg("Modo vincular: haz clic en la actividad origen y luego en la destino (Esc para salir).", false); }
+  else depMsg("", false);
+  render();
+}
+// Desfase (días) que deja cumplida, justo en el límite, una dependencia \`type\` entre las posiciones actuales. null si falta algún dato.
+function linkDelayDays(type, fromId, toId){
+  var f = findActivity(fromId), t = findActivity(toId);
+  if (!f || !t || f.act.start === null || t.act.start === null) return null;
+  var SD = slotDays(), fa = f.act, ta = t.act;
+  var fs = fa.start*SD, fe = (fa.end+1)*SD, ts = ta.start*SD, te = (ta.end+1)*SD;
+  if (type === "SS") return ts - fs;
+  if (type === "FF") return te - fe;
+  if (type === "SF") return te - fs;
+  return ts - fe;   // FS
+}
+function handleLinkClick(id){
+  if (!linkFrom){ linkFrom = id; render(); var f = findActivity(id); depMsg("Origen: " + (f ? f.act.name : "") + ". Ahora haz clic en la actividad destino.", false); return; }
+  if (linkFrom === id){ linkFrom = null; render(); depMsg("Origen cancelado.", false); return; }
+  var from = linkFrom; linkFrom = null;
+  if (depPairExists(from, id)){ render(); depMsg("Esas dos actividades ya están ligadas.", true); return; }
+  if (depWouldCycle(from, id)){ render(); depMsg("No se creó: generaría un ciclo de dependencias.", true); return; }
+  var ltype = document.getElementById("depLinkType").value || "FS";
+  var keep = document.getElementById("depLinkKeep").checked;
+  var delay = 0, warn = "";
+  if (keep){
+    var raw = linkDelayDays(ltype, from, id);
+    if (raw === null) warn = " (alguna actividad no tiene fechas: desfase 0)";
+    else if (raw < 0){ warn = " (el plazo actual no cumple este tipo: faltan " + (-raw) + " día(s); desfase 0 y quedará marcada como incumplida)"; }
+    else delay = raw;
+  }
+  state.deps.push({ id: uid("dep"), from: from, to: id, type: ltype, delay: delay });
+  save(); render(); depMsg("Dependencia " + ltype + " creada" + (keep && !warn ? " con desfase de " + delay + " día(s)" : "") + warn + ". Puedes seguir vinculando o salir con Esc.", !!warn);
+}
+document.getElementById("depLinkBtn").addEventListener("click", function(){ setLinkMode(!linkMode); });
+document.addEventListener("keydown", function(ev){ if (ev.key === "Escape" && linkMode) setLinkMode(false); });
+// Flechas de dependencias dibujadas sobre el Gantt (FS: fin → inicio; SS: inicio → inicio; FF: fin → fin; SF: inicio → fin).
+function drawDepArrows(vio){
+  var grid = document.getElementById("grid"); if (!grid) return;
+  var old = grid.querySelector("svg.deparrows"); if (old) old.remove();
+  if (!state.showDepArrows || !state.deps.length) return;
+  var rows = {};
+  Array.prototype.forEach.call(grid.querySelectorAll(".row[data-act]"), function(r){ rows[r.getAttribute("data-act")] = r; });
+  var NS = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "deparrows");
+  svg.setAttribute("width", grid.scrollWidth); svg.setAttribute("height", grid.scrollHeight);
+  var defs = document.createElementNS(NS, "defs");
+  [["arrOk","#6b7280"],["arrBad","#c0392b"]].forEach(function(c){
+    var mk = document.createElementNS(NS, "marker");
+    mk.setAttribute("id", c[0]); mk.setAttribute("viewBox", "0 0 8 8"); mk.setAttribute("refX", "7"); mk.setAttribute("refY", "4");
+    mk.setAttribute("markerWidth", "6"); mk.setAttribute("markerHeight", "6"); mk.setAttribute("orient", "auto");
+    var pa = document.createElementNS(NS, "path"); pa.setAttribute("d", "M0,0 L8,4 L0,8 z"); pa.setAttribute("fill", c[1]);
+    mk.appendChild(pa); defs.appendChild(mk);
+  });
+  svg.appendChild(defs);
+  var drawn = 0;
+  state.deps.forEach(function(d){
+    var f = findActivity(d.from), t = findActivity(d.to);
+    var rf = rows[d.from], rt = rows[d.to];
+    if (!f || !t || !rf || !rt || f.act.start === null || t.act.start === null) return;
+    var srcStart = (d.type === "SS" || d.type === "SF"), dstEnd = (d.type === "FF" || d.type === "SF");
+    var cf = rf.children[1 + (srcStart ? f.act.start : f.act.end)], ct = rt.children[1 + (dstEnd ? t.act.end : t.act.start)];
+    if (!cf || !ct) return;
+    var x1 = srcStart ? cf.offsetLeft : cf.offsetLeft + cf.offsetWidth;
+    var x2 = dstEnd ? ct.offsetLeft + ct.offsetWidth : ct.offsetLeft;
+    var y1 = rf.offsetTop + rf.offsetHeight / 2, y2 = rt.offsetTop + rt.offsetHeight / 2;
+    var bad = !!(vio && vio.violated && vio.violated[d.id]);
+    var dir = srcStart ? -1 : 1;                      // SS sale por la izquierda de la barra origen
+    var dirT = dstEnd ? 1 : -1;                     // FF entra por la derecha de la barra destino
+    var xa = x1 + 6 * dir, xb = x2 + 6 * dirT;
+    var path = document.createElementNS(NS, "path");
+    path.setAttribute("d", "M" + x1 + "," + y1 + " H" + xa + " V" + y2 + " H" + x2);
+    path.setAttribute("fill", "none"); path.setAttribute("stroke", bad ? "#c0392b" : "#6b7280");
+    path.setAttribute("stroke-width", bad ? "1.6" : "1.1"); path.setAttribute("opacity", bad ? "0.95" : "0.7");
+    path.setAttribute("marker-end", "url(#" + (bad ? "arrBad" : "arrOk") + ")");
+    svg.appendChild(path); drawn++;
+  });
+  grid.appendChild(svg);
+}
 document.getElementById("addDepBtn").addEventListener("click", function(){
   var from = document.getElementById("depFrom").value;
   var to = document.getElementById("depTo").value;
@@ -3944,7 +4185,7 @@ document.getElementById("depsHeader").addEventListener("click", function(){
 document.getElementById("resetBtn").addEventListener("click", function(){
   if (!confirmish(this, "restaurar el borrador inicial (se perderán tus cambios)")) return;
   state = defaultState();
-  document.getElementById("weeksInput").value = state.weeks;
+  syncTimeUnitUI();
   applyProjectTitle();
   save(); render();
 });
